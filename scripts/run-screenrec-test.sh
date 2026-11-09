@@ -22,7 +22,10 @@ if [ "${GITHUB_ACTIONS:-}" = true ]; then ci=true; fi
 work="$PWD/build/screenrec-test/$(date +%Y%m%d-%H%M%S)-$$"
 mkdir -p "$work"
 echo "Screen recording test artifacts: $work"
-exec > >(tee "$work/driver.log") 2>&1
+mkfifo "$work/driver.pipe"
+tee "$work/driver.log" < "$work/driver.pipe" &
+exec > "$work/driver.pipe" 2>&1
+rm "$work/driver.pipe"
 player_pid=""
 record_seconds=12.5
 recorder_timeout=53 # ceil(record_seconds + 40)
@@ -165,7 +168,13 @@ info.update(CFBundleIdentifier=sys.argv[2], CFBundleName="ScreenRecTest",
             CFBundleVersion="0.0.0", CAMGitSHA="unknown", CAMBuildChannel="dev")
 pathlib.Path(sys.argv[1]).write_bytes(plistlib.dumps(info))
 PLIST
-run_with_timeout 30 codesign --force --sign - "$app"
+if $ci; then
+    run_with_timeout 30 codesign --force --sign - "$app"
+else
+    # An explicit requirement avoids tying the local TCC grant to each build's hash.
+    run_with_timeout 30 codesign --force --deep --sign - \
+        -r="designated => identifier \"$bundle_id\"" "$app"
+fi
 player="$work/ClipPlayer.app"
 mkdir -p "$player/Contents/MacOS"
 run_with_timeout 15 python3 - "$player/Contents/Info.plist" <<'PLIST'
@@ -261,9 +270,27 @@ run_attempt() {
     done
     cat "$work/player-$attempt.log"
     sleep 1
-    run_with_timeout "$recorder_timeout" "$app/Contents/MacOS/MacPocketKnife" \
-        --record-selftest "$recording" "$record_seconds" > "$work/recorder-$attempt.log" 2>&1 || code=$?
-    cat "$work/recorder-$attempt.log"
+    if $ci; then
+        run_with_timeout "$recorder_timeout" "$app/Contents/MacOS/MacPocketKnife" \
+            --record-selftest "$recording" "$record_seconds" > "$work/recorder-$attempt.log" 2>&1 || code=$?
+    else
+        local result="$work/recorder-$attempt.result" log="$work/recorder-$attempt.log" status=""
+        # LaunchServices makes the bundle responsible for its own TCC permission.
+        run_with_timeout "$recorder_timeout" open -n -W -a "$app" \
+            --stdout "$log" --stderr "$log" \
+            --args --record-selftest "$recording" "$record_seconds" --result-file "$result" \
+            > "$work/recorder-launch-$attempt.log" 2>&1 || code=$?
+        if [ "$code" -ne 124 ]; then
+            if [ -f "$result" ]; then
+                read -r status _ < "$result" || true
+            fi
+            case "$status" in
+                exit=0|exit=1|exit=2|exit=10) code=${status#exit=} ;;
+                *) echo "TIMEOUT: recorder result file missing or invalid"; code=30 ;;
+            esac
+        fi
+    fi
+    if [ -f "$work/recorder-$attempt.log" ]; then cat "$work/recorder-$attempt.log"; fi
     if [ "$code" -ne 0 ]; then
         stop_player
         return "$code"
@@ -308,6 +335,11 @@ while true; do
 done
 if [ -f "$work/timed-out" ]; then exit 30; fi
 if [ "$code" -ne 0 ]; then
+    if [ "$code" -eq 30 ]; then exit 30; fi
+    if [ "$code" -eq 10 ] && ! $ci; then
+        echo "PERMISSION DENIED"
+        echo "Enable ScreenRecTest in System Settings > Privacy & Security > Screen & System Audio Recording (use + and pick build/ScreenRecTest.app if it is not listed), then rerun."
+    fi
     if [ "$code" -ne 10 ] && { $no_output || { [ -f "$work/verify-$attempt.log" ] && grep -q '^AUDIO_NOT_CAPTURED' "$work/verify-$attempt.log"; }; }; then
         if $no_output; then
             echo "AUDIO NOT CAPTURED (runner has no audio device)"

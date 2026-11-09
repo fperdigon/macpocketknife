@@ -52,9 +52,12 @@ not cover the microphone, hotkey or clipboard path.
 Run `scripts/run-screenrec-test.sh` in a logged-in GUI session. It plays sound and
 flashes full-screen colours for about 15 seconds per attempt. Keep the Mac awake
 and unlocked, with an audio output device selected. The first run exits with
-`PERMISSION DENIED` (code 10) if access is missing. Add
-`build/ScreenRecTest.app` to System Settings > Privacy & Security > Screen Recording
-(or Screen & System Audio Recording), enable it, and rerun. The test never grants
+`PERMISSION DENIED` (code 10) if access is missing. Enable ScreenRecTest in System
+Settings > Privacy & Security > Screen & System Audio Recording (use + and pick
+`build/ScreenRecTest.app` if it is not listed), then rerun. Local runs launch through
+LaunchServices so permission belongs to the bundle, and use a stable bundle path
+and designated signing requirement to preserve grants across rebuilds; if macOS
+revokes access after a rebuild, re-enable it. The test never grants
 permission or changes audio devices locally. `--mic` is available only on the
 hidden recorder CLI; the end-to-end test checks system audio without a microphone.
 
