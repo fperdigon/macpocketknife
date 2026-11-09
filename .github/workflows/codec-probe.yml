@@ -16,10 +16,6 @@ name: Codec probe
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - scripts/screenrec/codec-probe.swift
-      - .github/workflows/codec-probe.yml
 
 permissions:
   contents: read
