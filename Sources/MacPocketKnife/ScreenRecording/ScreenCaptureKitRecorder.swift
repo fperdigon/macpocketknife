@@ -79,8 +79,12 @@ private final class RecordingOutput: NSObject, SCStreamOutput, SCStreamDelegate,
         let bitrate = ScreenRecordingFiles.bitrate(width: width, height: height, frameRate: frameRate)
         let compression: [String: Any] = [AVVideoAverageBitRateKey: bitrate,
                                           AVVideoExpectedSourceFrameRateKey: frameRate]
+        let colorProperties: [String: Any] = [AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
+                                               AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
+                                               AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2]
         let videoSettings: [String: Any] = [AVVideoCodecKey: AVVideoCodecType.h264,
                                             AVVideoWidthKey: width, AVVideoHeightKey: height,
+                                            AVVideoColorPropertiesKey: colorProperties,
                                             AVVideoCompressionPropertiesKey: compression]
         video = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
         let audioSettings: [String: Any] = [AVFormatIDKey: kAudioFormatMPEG4AAC,
@@ -235,6 +239,8 @@ final class ScreenCaptureKitRecorder: ScreenRecording {
         config.showsCursor = configuration.showsCursor
         config.queueDepth = 6
         config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+        config.colorSpaceName = CGColorSpace.sRGB
+        config.colorMatrix = CGDisplayStream.yCbCrMatrix_ITU_R_709_2
         config.capturesAudio = true
         config.excludesCurrentProcessAudio = true
         config.sampleRate = 48_000

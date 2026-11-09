@@ -155,7 +155,6 @@ fi
 
 run_with_timeout 180 swift build
 binary_dir="$(run_with_timeout 30 swift build --show-bin-path)"
-# Keep a stable bundle path and identity so local authorization survives reruns.
 app="$PWD/build/ScreenRecTest.app"
 bundle_id=io.github.fperdigon.macpocketknife.screenrectest
 mkdir -p "$app/Contents/MacOS"
@@ -168,13 +167,7 @@ info.update(CFBundleIdentifier=sys.argv[2], CFBundleName="ScreenRecTest",
             CFBundleVersion="0.0.0", CAMGitSHA="unknown", CAMBuildChannel="dev")
 pathlib.Path(sys.argv[1]).write_bytes(plistlib.dumps(info))
 PLIST
-if $ci; then
-    run_with_timeout 30 codesign --force --sign - "$app"
-else
-    # An explicit requirement avoids tying the local TCC grant to each build's hash.
-    run_with_timeout 30 codesign --force --deep --sign - \
-        -r="designated => identifier \"$bundle_id\"" "$app"
-fi
+run_with_timeout 30 codesign --force --sign - "$app"
 player="$work/ClipPlayer.app"
 mkdir -p "$player/Contents/MacOS"
 run_with_timeout 15 python3 - "$player/Contents/Info.plist" <<'PLIST'

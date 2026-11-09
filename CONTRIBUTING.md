@@ -55,9 +55,12 @@ and unlocked, with an audio output device selected. The first run exits with
 `PERMISSION DENIED` (code 10) if access is missing. Enable ScreenRecTest in System
 Settings > Privacy & Security > Screen & System Audio Recording (use + and pick
 `build/ScreenRecTest.app` if it is not listed), then rerun. Local runs launch through
-LaunchServices so permission belongs to the bundle, and use a stable bundle path
-and designated signing requirement to preserve grants across rebuilds; if macOS
-revokes access after a rebuild, re-enable it. The test never grants
+LaunchServices so permission belongs to the bundle. The grant is tied to the exact
+build. After code changes, run
+`tccutil reset ScreenCapture io.github.fperdigon.macpocketknife.screenrectest`,
+re-add `build/ScreenRecTest.app`, and allow the one-time macOS consent dialog before
+rerunning the test; otherwise the dialog covers the screen and fails the colour
+check. The test never grants
 permission or changes audio devices locally. `--mic` is available only on the
 hidden recorder CLI; the end-to-end test checks system audio without a microphone.
 
