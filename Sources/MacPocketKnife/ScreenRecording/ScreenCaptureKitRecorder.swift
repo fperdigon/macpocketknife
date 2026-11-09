@@ -16,7 +16,7 @@ import AppKit
 import AVFoundation
 import CoreGraphics
 import MacPocketKnifeCore
-import ScreenCaptureKit
+@preconcurrency import ScreenCaptureKit
 
 @MainActor
 struct ScreenRecordingPermission: ScreenRecordingPermissionProviding {
