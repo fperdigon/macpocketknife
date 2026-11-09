@@ -22,14 +22,70 @@ let palette: [[UInt8]] = [
     [128, 0, 255], [0, 128, 128], [255, 128, 192], [128, 255, 0]
 ]
 
+// BT.709 coefficients, with video-range Y (16...235) and Cb/Cr (16...240).
+let ycbcrPalette: [[UInt8]] = palette.map { color in
+    let r = Double(color[0]) / 255, g = Double(color[1]) / 255, b = Double(color[2]) / 255
+    let y = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    return [16 + 219 * y, 128 + 224 * (b - y) / 1.8556, 128 + 224 * (r - y) / 1.5748]
+        .map { UInt8(clamping: Int($0.rounded())) }
+}
+
+// The watchdog reads counters independently of any potentially stuck encoder call.
+final class ClipProgress: @unchecked Sendable {
+    private let lock = NSLock()
+    private var frames = 0
+    private var audioBuffers = 0
+    let writer: AVAssetWriter
+
+    init(writer: AVAssetWriter) { self.writer = writer }
+
+    func appended(video: Bool) {
+        lock.lock()
+        if video { frames += 1 } else { audioBuffers += 1 }
+        let report = video && frames % 60 == 0
+        lock.unlock()
+        if report { printStatus("Progress") }
+    }
+
+    func printStatus(_ reason: String) {
+        lock.lock()
+        let counts = "frames appended=\(frames), audio buffers appended=\(audioBuffers)"
+        lock.unlock()
+        FileHandle.standardError.write(Data(
+            "\(reason): \(counts), writer.status=\(writer.status.rawValue), writer.error=\(String(describing: writer.error))\n".utf8))
+    }
+}
+
+func waitUntilReady(_ input: AVAssetWriterInput, writer: AVAssetWriter, progress: ClipProgress) throws {
+    let deadline = DispatchTime.now() + .seconds(10)
+    while !input.isReadyForMoreMediaData {
+        guard writer.status == .writing else {
+            throw writer.error ?? NSError(domain: "Writer stopped while waiting for \(input.mediaType)", code: 1)
+        }
+        guard DispatchTime.now() < deadline else {
+            progress.printStatus("TIMEOUT waiting for \(input.mediaType) after 10s")
+            exit(3)
+        }
+        Thread.sleep(forTimeInterval: 0.001)
+    }
+}
+
 func makeClip(_ path: String, silent: Bool, shuffled: Bool) throws {
     let writer = try AVAssetWriter(outputURL: URL(fileURLWithPath: path), fileType: .mp4)
+    let progress = ClipProgress(writer: writer)
+    DispatchQueue.global().asyncAfter(deadline: .now() + .seconds(45)) {
+        progress.printStatus("TIMEOUT make-clip after 45s")
+        exit(3)
+    }
     let video = AVAssetWriterInput(mediaType: .video, outputSettings: [
         AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 1280, AVVideoHeightKey: 720,
-        AVVideoCompressionPropertiesKey: [AVVideoAverageBitRateKey: 2_000_000]
+        AVVideoCompressionPropertiesKey: [AVVideoAverageBitRateKey: 2_000_000],
+        AVVideoColorPropertiesKey: [AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
+                                    AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
+                                    AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2]
     ])
     let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: video,
-        sourcePixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+        sourcePixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
                                      kCVPixelBufferWidthKey as String: 1280,
                                      kCVPixelBufferHeightKey as String: 720])
     let audio = AVAssetWriterInput(mediaType: .audio, outputSettings: [
@@ -56,30 +112,34 @@ func makeClip(_ path: String, silent: Bool, shuffled: Bool) throws {
         magicCookieSize: 0, magicCookie: nil, extensions: nil, formatDescriptionOut: &format)
     for frame in 0..<360 {
         let slot = shuffled ? 11 - frame / 30 : frame / 30
-        while !video.isReadyForMoreMediaData {
-            guard writer.status == .writing else { throw writer.error ?? NSError(domain: "Video writer stopped", code: 1) }
-            Thread.sleep(forTimeInterval: 0.001)
-        }
+        try waitUntilReady(video, writer: writer, progress: progress)
         var buffer: CVPixelBuffer?
         CVPixelBufferPoolCreatePixelBuffer(nil, adaptor.pixelBufferPool!, &buffer)
         let pixel = buffer!
         CVPixelBufferLockBaseAddress(pixel, [])
-        let bytes = CVPixelBufferGetBaseAddress(pixel)!.assumingMemoryBound(to: UInt8.self)
-        let stride = CVPixelBufferGetBytesPerRow(pixel)
-        let color = palette[slot]
-        let packed = UInt32(color[2]) | (UInt32(color[1]) << 8) | (UInt32(color[0]) << 16) | 0xFF000000
-        for y in 0..<720 {
-            let row = UnsafeMutableRawPointer(bytes.advanced(by: y * stride)).assumingMemoryBound(to: UInt32.self)
-            row.update(repeating: packed, count: 1280)
+        let color = ycbcrPalette[slot]
+        let yBytes = CVPixelBufferGetBaseAddressOfPlane(pixel, 0)!.assumingMemoryBound(to: UInt8.self)
+        let yStride = CVPixelBufferGetBytesPerRowOfPlane(pixel, 0)
+        for row in 0..<720 {
+            yBytes.advanced(by: row * yStride).update(repeating: color[0], count: 1280)
         }
+        let chroma = CVPixelBufferGetBaseAddressOfPlane(pixel, 1)!.assumingMemoryBound(to: UInt8.self)
+        let chromaStride = CVPixelBufferGetBytesPerRowOfPlane(pixel, 1)
+        for row in 0..<360 {
+            let bytes = chroma.advanced(by: row * chromaStride)
+            for column in 0..<640 {
+                bytes[column * 2] = color[1]
+                bytes[column * 2 + 1] = color[2]
+            }
+        }
+        CVBufferSetAttachment(pixel, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_709_2,
+                              .shouldPropagate)
         CVPixelBufferUnlockBaseAddress(pixel, [])
         guard adaptor.append(pixel, withPresentationTime: CMTime(value: Int64(frame), timescale: 30)) else {
             throw writer.error!
         }
-        while !audio.isReadyForMoreMediaData {
-            guard writer.status == .writing else { throw writer.error ?? NSError(domain: "Audio writer stopped", code: 1) }
-            Thread.sleep(forTimeInterval: 0.001)
-        }
+        progress.appended(video: true)
+        try waitUntilReady(audio, writer: writer, progress: progress)
         var samples = [Float](repeating: 0, count: 1600)
         for index in samples.indices {
             let position = frame * 1600 + index
@@ -104,12 +164,16 @@ func makeClip(_ path: String, silent: Bool, shuffled: Bool) throws {
             sampleCount: 1600, sampleTimingEntryCount: 1, sampleTimingArray: &timing,
             sampleSizeEntryCount: 1, sampleSizeArray: &size, sampleBufferOut: &sample)
         guard audio.append(sample!) else { throw writer.error! }
+        progress.appended(video: false)
     }
     writer.endSession(atSourceTime: CMTime(value: 12, timescale: 1))
     video.markAsFinished(); audio.markAsFinished()
     let done = DispatchSemaphore(value: 0)
     writer.finishWriting { done.signal() }
-    done.wait()
+    guard done.wait(timeout: .now() + .seconds(15)) == .success else {
+        progress.printStatus("TIMEOUT finishing clip")
+        exit(3)
+    }
     guard writer.status == .completed else { throw writer.error! }
     print("Generated 12 slots, 12.0 s, 1280x720, 30 fps, H.264/AAC: \(path)")
 }

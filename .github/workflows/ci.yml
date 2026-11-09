@@ -135,13 +135,14 @@ jobs:
 
   screenrec-test:
     runs-on: macos-15
-    timeout-minutes: 15
+    timeout-minutes: 10
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Select Xcode 16.4
         run: sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
       - name: Screen recording correlation test
+        timeout-minutes: 8
         run: scripts/run-screenrec-test.sh --ci
       - uses: actions/upload-artifact@v4
         if: always()

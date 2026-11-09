@@ -25,9 +25,106 @@ echo "Screen recording test artifacts: $work"
 exec > >(tee "$work/driver.log") 2>&1
 player_pid=""
 record_seconds=12.5
+recorder_timeout=53 # ceil(record_seconds + 40)
+
+# Snapshot descendants before TERM, since they may be reparented afterwards.
+process_tree() {
+    local pid=$1 child
+    for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+        process_tree "$child"
+    done
+    echo "$pid"
+}
+
+stop_player() {
+    [ -n "$player_pid" ] || return 0
+    local targets
+    targets=$(process_tree "$player_pid")
+    kill -TERM $targets 2>/dev/null || true
+    sleep 2
+    kill -KILL $targets 2>/dev/null || true
+    wait "$player_pid" 2>/dev/null || true
+    player_pid=""
+}
+
+run_with_timeout() {
+    local seconds=$1
+    shift
+    local step=$1 pid timer code=0 marker targets
+    "$@" <&0 &
+    pid=$!
+    marker="$work/timeout-$pid"
+    echo "$pid" > "$work/active-$pid"
+    (
+        sleeper=""
+        trap '[ -z "$sleeper" ] || kill "$sleeper" 2>/dev/null; exit 0' TERM INT
+        sleep "$seconds" &
+        sleeper=$!
+        wait "$sleeper" || exit 0
+        sleeper=""
+        echo "TIMEOUT: $step after ${seconds}s" >&2
+        touch "$marker" "$work/timed-out"
+        targets=$(process_tree "$pid")
+        echo "$targets" > "$work/active-$pid"
+        kill -TERM $targets 2>/dev/null || true
+        sleep 2 &
+        sleeper=$!
+        wait "$sleeper" || true
+        sleeper=""
+        kill -KILL $targets 2>/dev/null || true
+    ) &
+    timer=$!
+    echo "$timer" > "$work/active-$timer"
+    wait "$pid" || code=$?
+    # make-clip's own watchdog exits before this outer deadline.
+    if [ "${step##*/}" = make-clip ] && [ "$code" -eq 3 ]; then
+        echo "TIMEOUT: $step (internal watchdog)" >&2
+        touch "$marker" "$work/timed-out"
+        kill -TERM "$timer" 2>/dev/null || true
+    fi
+    if [ -f "$marker" ]; then
+        wait "$timer" || true
+        code=124
+    else
+        # The timer trap also kills its sleep, including in command substitutions.
+        kill -TERM "$timer" 2>/dev/null || true
+        wait "$timer" 2>/dev/null || true
+    fi
+    rm -f "$work/active-$pid" "$work/active-$timer" "$marker"
+    return "$code"
+}
+
 finish() {
     local code=$?
-    if [ -n "$player_pid" ]; then kill "$player_pid" 2>/dev/null || true; fi
+    set +e # Diagnostics must never prevent helper cleanup.
+    trap - EXIT
+    if [ "$code" -eq 124 ] || [ -f "$work/timed-out" ]; then code=30; fi
+    if [ "$code" -ne 0 ]; then
+        echo "== Failure diagnostics: artifact sizes"
+        find "$work" -type f -exec ls -lh {} +
+        echo "== Helper processes before cleanup"
+        ps -axo pid,ppid,etime,command | grep -E 'make-clip|play-clip|audio-device|MacPocketKnife|screenrec|/verify' || true
+        for log in "$work"/*.log; do
+            [ -f "$log" ] || continue
+            echo "== Tail: $log"
+            tail -n 60 "$log"
+        done
+    fi
+    # PID files also cover helpers launched inside the background player wrapper.
+    local entry pid targets=""
+    for entry in "$work"/active-*; do
+        [ -f "$entry" ] || continue
+        for pid in $(cat "$entry"); do
+            targets="$targets $(process_tree "$pid")"
+        done
+    done
+    if [ -n "$player_pid" ]; then targets="$targets $(process_tree "$player_pid")"; fi
+    if [ -n "$targets" ]; then
+        kill -TERM $targets 2>/dev/null || true
+        sleep 2
+        kill -KILL $targets 2>/dev/null || true
+    fi
+    rm -f "$work"/active-*
     echo "Screen recording test exit: $code; artifacts: $work"
     if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
         {
@@ -40,26 +137,27 @@ finish() {
             echo '```'
         } >> "$GITHUB_STEP_SUMMARY"
     fi
+    exit "$code"
 }
 trap finish EXIT
 trap 'exit 130' INT TERM
 
 if $ci; then
-    sw_vers || true
-    system_profiler SPDisplaysDataType || true
-    system_profiler SPAudioDataType || true
-    csrutil status || true
+    run_with_timeout 15 sw_vers || true
+    run_with_timeout 30 system_profiler SPDisplaysDataType || true
+    run_with_timeout 30 system_profiler SPAudioDataType || true
+    run_with_timeout 15 csrutil status || true
     pgrep -fl WindowServer || true
 fi
 
-swift build
-binary_dir="$(swift build --show-bin-path)"
+run_with_timeout 180 swift build
+binary_dir="$(run_with_timeout 30 swift build --show-bin-path)"
 # Keep a stable bundle path and identity so local authorization survives reruns.
 app="$PWD/build/ScreenRecTest.app"
 bundle_id=io.github.fperdigon.macpocketknife.screenrectest
 mkdir -p "$app/Contents/MacOS"
 cp "$binary_dir/MacPocketKnife" "$app/Contents/MacOS/MacPocketKnife"
-python3 - "$app/Contents/Info.plist" "$bundle_id" <<'PLIST'
+run_with_timeout 15 python3 - "$app/Contents/Info.plist" "$bundle_id" <<'PLIST'
 import pathlib, plistlib, sys
 info = plistlib.loads(pathlib.Path("Resources/Info.plist").read_bytes())
 info.update(CFBundleIdentifier=sys.argv[2], CFBundleName="ScreenRecTest",
@@ -67,10 +165,10 @@ info.update(CFBundleIdentifier=sys.argv[2], CFBundleName="ScreenRecTest",
             CFBundleVersion="0.0.0", CAMGitSHA="unknown", CAMBuildChannel="dev")
 pathlib.Path(sys.argv[1]).write_bytes(plistlib.dumps(info))
 PLIST
-codesign --force --sign - "$app"
+run_with_timeout 30 codesign --force --sign - "$app"
 player="$work/ClipPlayer.app"
 mkdir -p "$player/Contents/MacOS"
-python3 - "$player/Contents/Info.plist" <<'PLIST'
+run_with_timeout 15 python3 - "$player/Contents/Info.plist" <<'PLIST'
 import pathlib, plistlib, sys
 info = dict(CFBundleIdentifier="io.github.fperdigon.macpocketknife.clipplayer",
             CFBundleExecutable="play-clip", CFBundleName="ClipPlayer",
@@ -78,18 +176,21 @@ info = dict(CFBundleIdentifier="io.github.fperdigon.macpocketknife.clipplayer",
 pathlib.Path(sys.argv[1]).write_bytes(plistlib.dumps(info))
 PLIST
 for source in make-clip verify audio-device; do
-    swiftc -swift-version 6 -target "$(uname -m)-apple-macosx13.0" scripts/screenrec/"$source.swift" -o "$work/$source"
+    run_with_timeout 90 swiftc -swift-version 6 -target "$(uname -m)-apple-macosx13.0" scripts/screenrec/"$source.swift" -o "$work/$source"
 done
-swiftc -swift-version 6 -target "$(uname -m)-apple-macosx13.0" scripts/screenrec/play-clip.swift -o "$player/Contents/MacOS/play-clip"
-codesign --force --sign - "$player"
-"$work/make-clip" "$work/reference.mp4"
-"$work/verify" --selftest > "$work/verifier-selftest.log"
+run_with_timeout 90 swiftc -swift-version 6 -target "$(uname -m)-apple-macosx13.0" scripts/screenrec/play-clip.swift -o "$player/Contents/MacOS/play-clip"
+run_with_timeout 30 codesign --force --sign - "$player"
+run_with_timeout 60 "$work/make-clip" "$work/reference.mp4" > "$work/make-reference.log" 2>&1
+run_with_timeout 90 "$work/verify" --selftest > "$work/verifier-selftest.log" 2>&1
 cat "$work/verifier-selftest.log"
-"$work/verify" "$work/reference.mp4" "$work/reference.mp4" --seconds 12 > "$work/reference-check.log"
+run_with_timeout 90 "$work/verify" "$work/reference.mp4" "$work/reference.mp4" --seconds 12 > "$work/reference-check.log" 2>&1
 cat "$work/reference-check.log"
 for control in silent shuffled; do
-    "$work/make-clip" "$work/$control.mp4" "--$control"
-    if "$work/verify" "$work/reference.mp4" "$work/$control.mp4" --seconds 12 > "$work/$control-check.log"; then
+    run_with_timeout 60 "$work/make-clip" "$work/$control.mp4" "--$control" > "$work/make-$control.log" 2>&1
+    control_code=0
+    run_with_timeout 90 "$work/verify" "$work/reference.mp4" "$work/$control.mp4" --seconds 12 > "$work/$control-check.log" 2>&1 || control_code=$?
+    if [ "$control_code" -eq 124 ]; then exit 30; fi
+    if [ "$control_code" -eq 0 ]; then
         echo "FAIL negative control unexpectedly passed: $control"
         exit 1
     fi
@@ -105,7 +206,11 @@ for control in silent shuffled; do
 done
 
 no_output=false
-if ! "$work/audio-device"; then no_output=true; fi
+audio_code=0
+run_with_timeout 15 "$work/audio-device" > "$work/audio-device.log" 2>&1 || audio_code=$?
+cat "$work/audio-device.log"
+if [ "$audio_code" -eq 124 ]; then exit 30; fi
+if [ "$audio_code" -ne 0 ]; then no_output=true; fi
 
 # Disposable CI runners only. Called exclusively after exit 10 from preflight.
 grant_screen_capture_on_runner() {
@@ -114,8 +219,8 @@ grant_screen_capture_on_runner() {
     local system_db="/Library/Application Support/com.apple.TCC/TCC.db"
     local sql="INSERT OR REPLACE INTO access(service,client,client_type,auth_value,auth_reason,auth_version,flags,last_modified) VALUES('kTCCServiceScreenCapture','$bundle_id',0,2,4,1,0,strftime('%s','now'));"
     echo "Granting ScreenCapture to $bundle_id on disposable CI runner"
-    if ! sqlite3 "$db" "$sql"; then
-        sudo sqlite3 "$system_db" "$sql" || return 1
+    if ! run_with_timeout 15 sqlite3 "$db" "$sql"; then
+        run_with_timeout 15 sudo sqlite3 "$system_db" "$sql" || return 1
     fi
     killall tccd 2>/dev/null || true
     sleep 2
@@ -126,13 +231,13 @@ grant_screen_capture_on_runner() {
 install_runner_audio() {
     $ci || return 1
     echo "Trying a BlackHole virtual output on the disposable runner"
-    if ! brew install --cask blackhole-2ch; then
-        brew install blackhole-2ch || return 1
+    if ! run_with_timeout 120 brew install --cask blackhole-2ch; then
+        run_with_timeout 120 brew install blackhole-2ch || return 1
     fi
-    sudo killall coreaudiod || true
+    run_with_timeout 15 sudo killall coreaudiod || true
     sleep 3
-    "$work/audio-device" --select-blackhole || return 1
-    system_profiler SPAudioDataType || true
+    run_with_timeout 15 "$work/audio-device" --select-blackhole > "$work/audio-device-blackhole.log" 2>&1 || return 1
+    run_with_timeout 30 system_profiler SPAudioDataType || true
 }
 
 attempt=0
@@ -140,7 +245,7 @@ run_attempt() {
     attempt=$((attempt + 1))
     local recording="$work/recording-$attempt.mp4" code=0
     echo "== Capture attempt $attempt"
-    "$player/Contents/MacOS/play-clip" "$work/reference.mp4" > "$work/player-$attempt.log" 2>&1 &
+    run_with_timeout 42 "$player/Contents/MacOS/play-clip" "$work/reference.mp4" > "$work/player-$attempt.log" 2>&1 &
     player_pid=$!
     # Wait for advancing media time, rather than assuming process launch means playback.
     local tick=0
@@ -148,9 +253,7 @@ run_attempt() {
         if ! kill -0 "$player_pid" 2>/dev/null || [ "$tick" -ge 100 ]; then
             cat "$work/player-$attempt.log"
             echo "FAIL player did not start"
-            kill "$player_pid" 2>/dev/null || true
-            wait "$player_pid" 2>/dev/null || true
-            player_pid=""
+            stop_player
             return 1
         fi
         sleep 0.1
@@ -158,27 +261,17 @@ run_attempt() {
     done
     cat "$work/player-$attempt.log"
     sleep 1
-    python3 - "$app/Contents/MacOS/MacPocketKnife" "$recording" "$record_seconds" > "$work/recorder-$attempt.log" 2>&1 <<'RECORD'
-import subprocess, sys
-try:
-    result = subprocess.run([sys.argv[1], "--record-selftest", sys.argv[2], sys.argv[3]], timeout=40)
-    sys.exit(result.returncode if result.returncode >= 0 else 1)
-except subprocess.TimeoutExpired:
-    print("FAIL recorder timed out", flush=True)
-    sys.exit(1)
-RECORD
-    code=$?
+    run_with_timeout "$recorder_timeout" "$app/Contents/MacOS/MacPocketKnife" \
+        --record-selftest "$recording" "$record_seconds" > "$work/recorder-$attempt.log" 2>&1 || code=$?
     cat "$work/recorder-$attempt.log"
     if [ "$code" -ne 0 ]; then
-        kill "$player_pid" 2>/dev/null || true
-        wait "$player_pid" 2>/dev/null || true
-        player_pid=""
+        stop_player
         return "$code"
     fi
     wait "$player_pid" || code=$?
     player_pid=""
     if [ "$code" -ne 0 ]; then cat "$work/player-$attempt.log"; return "$code"; fi
-    "$work/verify" "$work/reference.mp4" "$recording" --seconds "$record_seconds" \
+    run_with_timeout 90 "$work/verify" "$work/reference.mp4" "$recording" --seconds "$record_seconds" \
         --frames "$work/frames-$attempt" > "$work/verify-$attempt.log" 2>&1 || code=$?
     cat "$work/verify-$attempt.log"
     return "$code"
@@ -192,22 +285,28 @@ code=0
 while true; do
     code=0
     run_attempt || code=$?
+    if [ "$code" -eq 124 ] || [ -f "$work/timed-out" ]; then exit 30; fi
     if [ "$code" -eq 0 ]; then break; fi
     if [ "$code" -eq 10 ] && $ci && ! $permission_retried; then
         permission_retried=true
-        if grant_screen_capture_on_runner; then continue; fi
+        if grant_screen_capture_on_runner; then
+            [ ! -f "$work/timed-out" ] || exit 30
+            continue
+        fi
     fi
     silent=false
     if [ -f "$work/verify-$attempt.log" ] && grep -q '^AUDIO_NOT_CAPTURED' "$work/verify-$attempt.log"; then silent=true; fi
     if [ "$code" -ne 10 ] && $ci && ! $audio_retried && { $no_output || $silent; }; then
         audio_retried=true
         if install_runner_audio; then
+            [ ! -f "$work/timed-out" ] || exit 30
             no_output=false
             continue
         fi
     fi
     break
 done
+if [ -f "$work/timed-out" ]; then exit 30; fi
 if [ "$code" -ne 0 ]; then
     if [ "$code" -ne 10 ] && { $no_output || { [ -f "$work/verify-$attempt.log" ] && grep -q '^AUDIO_NOT_CAPTURED' "$work/verify-$attempt.log"; }; }; then
         if $no_output; then

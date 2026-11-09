@@ -213,7 +213,7 @@ final class ScreenCaptureKitRecorder: ScreenRecording {
         config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(configuration.frameRate))
         config.showsCursor = configuration.showsCursor
         config.queueDepth = 6
-        config.pixelFormat = kCVPixelFormatType_32BGRA
+        config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
         config.capturesAudio = true
         config.excludesCurrentProcessAudio = true
         config.sampleRate = 48_000
