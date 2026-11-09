@@ -16,12 +16,19 @@
 @preconcurrency import AppKit
 import Foundation
 
+let halfChannel: Double = 128.0 / 255.0
+let threeQuarterChannel: Double = 192.0 / 255.0
 let palette: [[Double]] = [
     [1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 0], [1, 0, 1], [0, 1, 1],
-    [1, 1, 1], [1, 128.0/255, 0], [128.0/255, 0, 1],
-    [0, 128.0/255, 128.0/255], [1, 128.0/255, 192.0/255], [128.0/255, 1, 0]
+    [1, 1, 1], [1, halfChannel, 0], [halfChannel, 0, 1],
+    [0, halfChannel, halfChannel], [1, halfChannel, threeQuarterChannel], [halfChannel, 1, 0]
 ]
-let frequencies = (0..<12).map { Double(440 + 110 * $0) }
+func frequency(for slot: Int) -> Double {
+    let offset: Int = 110 * slot
+    let hertz: Int = 440 + offset
+    return Double(hertz)
+}
+let frequencies: [Double] = (0..<12).map { frequency(for: $0) }
 struct Event {
     let slot: Int
     let time: Double
@@ -37,29 +44,69 @@ struct Analysis {
     var hasVideo = false
     var hasAudio = false
 }
-func classify(_ rgb: [Double]) -> Int? {
-    let distances = palette.map { color in
-        zip(color, rgb).reduce(0.0) { $0 + pow($1.0 - $1.1, 2) }
+func colorDistance(_ color: [Double], _ rgb: [Double]) -> Double {
+    var distance: Double = 0.0
+    for (channel, observed) in zip(color, rgb) {
+        let difference: Double = channel - observed
+        let squared: Double = pow(difference, 2.0)
+        distance += squared
     }
+    return distance
+}
+func classify(_ rgb: [Double]) -> Int? {
+    let distances: [Double] = palette.map { colorDistance($0, rgb) }
     let best = distances.indices.min(by: { distances[$0] < distances[$1] })!
     return distances[best] < 0.035 ? best : nil
 }
-func tone(_ samples: ArraySlice<Float>) -> Int? {
-    let energy = samples.reduce(0.0) { $0 + Double($1) * Double($1) }
-    guard energy / Double(samples.count) > 0.000225 else { return nil }
-    let powers = frequencies.map { frequency -> Double in
-        let coefficient = 2 * cos(2 * .pi * frequency / 48_000)
-        var previous = 0.0
-        var older = 0.0
-        for sample in samples {
-            let current = Double(sample) + coefficient * previous - older
-            older = previous; previous = current
-        }
-        return previous * previous + older * older - coefficient * previous * older
+func sampleEnergy(_ samples: ArraySlice<Float>) -> Double {
+    var energy: Double = 0.0
+    for sample in samples {
+        let value: Double = Double(sample)
+        let squared: Double = value * value
+        energy += squared
     }
+    return energy
+}
+func tonePower(_ samples: ArraySlice<Float>, frequency: Double) -> Double {
+    let angularScale: Double = 2.0 * Double.pi
+    let angularFrequency: Double = angularScale * frequency
+    let phase: Double = angularFrequency / 48_000.0
+    let coefficient: Double = 2.0 * cos(phase)
+    var previous: Double = 0.0
+    var older: Double = 0.0
+    for sample in samples {
+        let feedback: Double = coefficient * previous
+        let sum: Double = Double(sample) + feedback
+        let current: Double = sum - older
+        older = previous
+        previous = current
+    }
+    let previousSquared: Double = previous * previous
+    let olderSquared: Double = older * older
+    let squaredSum: Double = previousSquared + olderSquared
+    let weightedPrevious: Double = coefficient * previous
+    let crossTerm: Double = weightedPrevious * older
+    return squaredSum - crossTerm
+}
+func tone(_ samples: ArraySlice<Float>) -> Int? {
+    let energy: Double = sampleEnergy(samples)
+    let sampleCount: Double = Double(samples.count)
+    let meanEnergy: Double = energy / sampleCount
+    guard meanEnergy > 0.000225 else { return nil }
+    let powers: [Double] = frequencies.map { tonePower(samples, frequency: $0) }
     let best = powers.indices.max(by: { powers[$0] < powers[$1] })!
-    let fraction = 2 * powers[best] / (Double(samples.count) * energy)
+    let numerator: Double = 2.0 * powers[best]
+    let denominator: Double = sampleCount * energy
+    let fraction: Double = numerator / denominator
     return fraction > 0.35 ? best : nil
+}
+func toneSample(frequency: Double, position: Int) -> Float {
+    let angularScale: Double = 2.0 * Double.pi
+    let angularFrequency: Double = angularScale * frequency
+    let phaseNumerator: Double = angularFrequency * Double(position)
+    let phase: Double = phaseNumerator / 48_000.0
+    let amplitude: Double = 0.35 * sin(phase)
+    return Float(amplitude)
 }
 func append(_ slot: Int?, at time: Double, to events: inout [Event]) {
     if let slot, events.last?.slot != slot { events.append(Event(slot: slot, time: time)) }
@@ -126,7 +173,9 @@ func analyze(_ path: String) async throws -> Analysis {
             }
             guard status == noErr else { throw NSError(domain: "PCM copy failed", code: Int(status)) }
             // Preserve the container timeline, including an initial audio delay or missing buffers.
-            let position = max(0, Int((sample.presentationTimeStamp.seconds * 48_000).rounded()))
+            let samplePosition: Double = sample.presentationTimeStamp.seconds * 48_000.0
+            let roundedPosition: Double = samplePosition.rounded()
+            let position: Int = max(0, Int(roundedPosition))
             guard position + decoded.count <= 48_000 * 310 else { throw NSError(domain: "Audio exceeds 310 seconds", code: 1) }
             if samples.count < position + decoded.count {
                 samples.append(contentsOf: repeatElement(0, count: position + decoded.count - samples.count))
@@ -135,12 +184,15 @@ func analyze(_ path: String) async throws -> Analysis {
         }
         if reader.status == .failed { throw reader.error! }
         if !samples.isEmpty {
-            let energy = samples.reduce(0.0) { $0 + Double($1) * Double($1) }
-            result.rms = sqrt(energy / Double(samples.count))
+            let energy: Double = sampleEnergy(samples[...])
+            let meanEnergy: Double = energy / Double(samples.count)
+            result.rms = sqrt(meanEnergy)
             result.peak = Double(samples.map { abs($0) }.max() ?? 0)
         }
         for start in Swift.stride(from: 0, through: max(-1, samples.count - 4800), by: 4800) {
-            append(tone(samples[start..<(start + 4800)]), at: Double(start) / 48_000 + 0.05, to: &result.audio)
+            let startTime: Double = Double(start) / 48_000.0
+            let centerTime: Double = startTime + 0.05
+            append(tone(samples[start..<(start + 4800)]), at: centerTime, to: &result.audio)
         }
     }
     return result
@@ -184,7 +236,8 @@ func verify(_ reference: Analysis, _ recording: Analysis, seconds: Double?) -> B
     check(recording.rms > 0.015 && recording.peak > 0.04, "audio is not silent (RMS > 0.015, peak > 0.04)")
     if !recording.hasAudio || recording.rms <= 0.015 { print("AUDIO_NOT_CAPTURED") }
     let expectedSpan = seconds ?? recording.span
-    let tolerance = max(1.5, expectedSpan * 0.15)
+    let relativeTolerance: Double = expectedSpan * 0.15
+    let tolerance: Double = max(1.5, relativeTolerance)
     let durations = [recording.videoDuration, recording.audioDuration, recording.span]
     let durationOK = durations.allSatisfy { $0.isFinite && $0 > 0 && abs($0 - expectedSpan) <= tolerance }
     let pairOK = abs(recording.videoDuration - recording.audioDuration) <= tolerance
@@ -192,7 +245,9 @@ func verify(_ reference: Analysis, _ recording: Analysis, seconds: Double?) -> B
         recording.videoDuration, recording.audioDuration, recording.span, expectedSpan, tolerance))
     for (name, expected, observed) in [("video", reference.video, recording.video), ("audio", reference.audio, recording.audio)] {
         let count = lcs(expected, observed)
-        let minimum = max(5, Int(ceil(Double(observed.count) * 0.85)))
+        let requiredCount: Double = Double(observed.count) * 0.85
+        let roundedCount: Double = ceil(requiredCount)
+        let minimum: Int = max(5, Int(roundedCount))
         check(count >= minimum, "\(name) ordered slots=\(count)/\(observed.count), required=\(minimum)")
     }
     let videoBoundaries = boundaries(recording.video)
@@ -205,7 +260,8 @@ func verify(_ reference: Analysis, _ recording: Analysis, seconds: Double?) -> B
             print(String(format: "Boundary %@ video=%.3f audio=%.3f offset=%+.3f s", key, video, audio, offset))
         }
     }
-    let mean = offsets.isEmpty ? Double.infinity : offsets.reduce(0, +) / Double(offsets.count)
+    let totalOffset: Double = offsets.reduce(0.0, +)
+    let mean: Double = offsets.isEmpty ? Double.infinity : totalOffset / Double(offsets.count)
     let maximum = offsets.max() ?? .infinity
     check(offsets.count >= 4 && maximum < 0.300,
           String(format: "A/V sync boundaries=%d mean=%.3f max=%.3f s (limit 0.300 s)", offsets.count, mean, maximum))
@@ -215,7 +271,7 @@ func selftest() -> Bool {
     var passed = classify([0.4, 0.4, 0.4]) == nil
     for index in palette.indices {
         passed = passed && classify(palette[index]) == index
-        let samples = (0..<4800).map { Float(0.35 * sin(2 * .pi * frequencies[index] * Double($0) / 48_000)) }
+        let samples: [Float] = (0..<4800).map { toneSample(frequency: frequencies[index], position: $0) }
         passed = passed && tone(samples[...]) == index
     }
     passed = passed && tone([Float](repeating: 0, count: 4800)[...]) == nil

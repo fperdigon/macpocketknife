@@ -110,11 +110,20 @@ func printEncoderList() {
     }
 }
 
+func pcmSample(at frame: Int64) -> Int16 {
+    let angularScale: Double = 2.0 * Double.pi
+    let angularFrequency: Double = angularScale * 440.0
+    let phaseNumerator: Double = angularFrequency * Double(frame)
+    let phase: Double = phaseNumerator / 48_000.0
+    let amplitude: Double = sin(phase) * 12_000.0
+    return Int16(amplitude)
+}
+
 func makeAudioSample(format: CMAudioFormatDescription, frameCount: Int, startFrame: Int64) -> CMSampleBuffer? {
     var samples = [Int16](repeating: 0, count: frameCount * 2)
     for frame in 0..<frameCount {
-        let phase = 2.0 * Double.pi * 440.0 * Double(startFrame + Int64(frame)) / 48_000.0
-        let value = Int16(sin(phase) * 12_000)
+        let position: Int64 = startFrame + Int64(frame)
+        let value: Int16 = pcmSample(at: position)
         samples[frame * 2] = value
         samples[frame * 2 + 1] = value
     }
@@ -260,7 +269,7 @@ func runExtAudioFile() throws -> (Int, Bool) {
         UInt32(MemoryLayout.size(ofValue: source)), &source), "ExtAudioFile client PCM format")
     var samples = [Int16](repeating: 0, count: 48_000 * 2)
     for frame in 0..<48_000 {
-        let value = Int16(sin(2 * Double.pi * 440 * Double(frame) / 48_000) * 12_000)
+        let value: Int16 = pcmSample(at: Int64(frame))
         samples[frame * 2] = value
         samples[frame * 2 + 1] = value
     }

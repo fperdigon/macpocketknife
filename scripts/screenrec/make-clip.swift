@@ -23,11 +23,45 @@ let palette: [[UInt8]] = [
 ]
 
 // BT.709 coefficients, with video-range Y (16...235) and Cb/Cr (16...240).
-let ycbcrPalette: [[UInt8]] = palette.map { color in
-    let r = Double(color[0]) / 255, g = Double(color[1]) / 255, b = Double(color[2]) / 255
-    let y = 0.2126 * r + 0.7152 * g + 0.0722 * b
-    return [16 + 219 * y, 128 + 224 * (b - y) / 1.8556, 128 + 224 * (r - y) / 1.5748]
-        .map { UInt8(clamping: Int($0.rounded())) }
+func clampedByte(_ value: Double) -> UInt8 {
+    let rounded: Double = value.rounded()
+    let integer: Int = Int(rounded)
+    return UInt8(clamping: integer)
+}
+
+func ycbcr(_ color: [UInt8]) -> [UInt8] {
+    let r: Double = Double(color[0]) / 255.0
+    let g: Double = Double(color[1]) / 255.0
+    let b: Double = Double(color[2]) / 255.0
+    let redLuma: Double = 0.2126 * r
+    let greenLuma: Double = 0.7152 * g
+    let blueLuma: Double = 0.0722 * b
+    let redGreenLuma: Double = redLuma + greenLuma
+    let y: Double = redGreenLuma + blueLuma
+    let scaledY: Double = 219.0 * y
+    let videoY: Double = 16.0 + scaledY
+    let blueDifference: Double = b - y
+    let scaledBlueDifference: Double = 224.0 * blueDifference
+    let cbOffset: Double = scaledBlueDifference / 1.8556
+    let cb: Double = 128.0 + cbOffset
+    let redDifference: Double = r - y
+    let scaledRedDifference: Double = 224.0 * redDifference
+    let crOffset: Double = scaledRedDifference / 1.5748
+    let cr: Double = 128.0 + crOffset
+    return [clampedByte(videoY), clampedByte(cb), clampedByte(cr)]
+}
+
+let ycbcrPalette: [[UInt8]] = palette.map { ycbcr($0) }
+
+func toneSample(slot: Int, position: Int) -> Float {
+    let frequencyOffset: Int = slot * 110
+    let frequency: Double = Double(440 + frequencyOffset)
+    let angularScale: Double = 2.0 * Double.pi
+    let angularFrequency: Double = angularScale * frequency
+    let phaseNumerator: Double = angularFrequency * Double(position)
+    let phase: Double = phaseNumerator / 48_000.0
+    let amplitude: Double = 0.35 * sin(phase)
+    return Float(amplitude)
 }
 
 // The watchdog reads counters independently of any potentially stuck encoder call.
@@ -142,10 +176,12 @@ func makeClip(_ path: String, silent: Bool, shuffled: Bool) throws {
         try waitUntilReady(audio, writer: writer, progress: progress)
         var samples = [Float](repeating: 0, count: 1600)
         for index in samples.indices {
-            let position = frame * 1600 + index
-            let phase = Double(position % 48_000) / 48_000
+            let frameStart: Int = frame * 1600
+            let position: Int = frameStart + index
+            let positionInSecond: Int = position % 48_000
+            let phase: Double = Double(positionInSecond) / 48_000.0
             if !silent && phase >= 0.04 && phase < 0.96 {
-                samples[index] = Float(0.35 * sin(2 * .pi * Double(440 + slot * 110) * Double(position) / 48_000))
+                samples[index] = toneSample(slot: slot, position: position)
             }
         }
         var block: CMBlockBuffer?
