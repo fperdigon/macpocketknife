@@ -50,7 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         speech: AppleSpeechTranscriber(), pasteboard: SystemPasteboard(), notices: localNotifier
     )
     private lazy var screenRecording = ScreenRecordingController.make(
-        recorder: ScreenCaptureKitRecorder(), permission: ScreenRecordingPermission(),
+        factory: RecordingFactory(), displays: RecordingDisplays(), picker: RecordingPicker(), permission: ScreenRecordingPermission(),
         disk: RecordingDiskSpace(), files: RecordingFiles(), notices: localNotifier
     )
     private var isTerminating = false
@@ -212,7 +212,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         recordScreen.title = screenLabel + screenShortcut
         recordScreen.state = screenBusy ? .on : .off
         recordScreen.isEnabled = screenRecording.state != .stopping
-        let screenError = screenRecording.lastError ?? settings.screenRecordingHotkeyError
+        rebuildRecordingMenu(busy: screenBusy)
+        let screenError = screenRecording.lastError ?? settings.screenRecordingHotkeyError ?? screenRecording.lastNotice
         screenRecordingStatus.title = screenError ?? ""
         screenRecordingStatus.isHidden = screenError == nil
         var indicators = recording ? " ●" : ""
@@ -225,6 +226,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let error = dictation.lastError ?? settings.dictationHotkeyError
         dictationStatus.title = error ?? ""
         dictationStatus.isHidden = error == nil
+    }
+
+    private func rebuildRecordingMenu(busy: Bool) {
+        recordScreen.submenu = nil
+        recordScreen.action = #selector(toggleScreenRecording)
+        guard !busy else { return }
+        let displays = RecordingDisplays().connectedDisplays()
+        settings.connectedRecordingDisplays = displays
+        guard displays.count >= 2 else { return }
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        let defaultTarget = settings.settings.screenRecordingTarget
+        for display in displays {
+            let mainLabel = display.isMain ? " (Main)" : ""
+            let title = "\(display.name) — \(display.pixelWidth) × \(display.pixelHeight)\(mainLabel)"
+            let item = NSMenuItem(title: title, action: #selector(recordSelectedScreen(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = display.uuid
+            let selected = defaultTarget == .display(uuid: display.uuid) || (defaultTarget == .mainDisplay && display.isMain)
+            item.state = selected ? .on : .off
+            submenu.addItem(item)
+        }
+        submenu.addItem(.separator())
+        let all = NSMenuItem(title: "All screens (separate videos)", action: #selector(recordAllScreens), keyEquivalent: "")
+        all.target = self
+        all.state = defaultTarget == .allDisplays ? .on : .off
+        submenu.addItem(all)
+        if #available(macOS 14.0, *) {
+            let preview = NSMenuItem(title: "Choose with preview…", action: #selector(recordWithPreview), keyEquivalent: "")
+            preview.target = self
+            preview.state = defaultTarget == .askEachTime ? .on : .off
+            submenu.addItem(preview)
+        }
+        recordScreen.action = nil
+        recordScreen.submenu = submenu
+    }
+
+    @objc private func recordSelectedScreen(_ sender: NSMenuItem) {
+        guard let uuid = sender.representedObject as? String else { return }
+        screenRecording.toggle(settings: settings.settings, target: .display(uuid: uuid))
+    }
+    @objc private func recordAllScreens() {
+        screenRecording.toggle(settings: settings.settings, target: .allDisplays)
+    }
+    @objc private func recordWithPreview() {
+        screenRecording.toggle(settings: settings.settings, target: .askEachTime)
     }
 
     private func updateAuthorization(_ state: AuthorizationState) {
@@ -324,6 +371,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func openSettings(tab: SettingsView.Tab?) {
+        settings.connectedRecordingDisplays = RecordingDisplays().connectedDisplays()
         if settingsWindow == nil { settingsWindow = SettingsWindowController(model: settings, checkForUpdates: { [weak self] in self?.updates.checkNow() }) }
         settingsWindow?.show(tab: tab)
     }

@@ -14,7 +14,7 @@ Battery alerts escalate by severity and can be delivered through macOS local
 notifications or optional Telegram. Settings are available in tabs, and updates
 can be checked and installed in the app.
 
-- **Screen recording:** record the main display with system audio to MP4 using Control-Option-Command-R; optional microphone on macOS 15+, with local files and notifications.
+- **Screen recording:** choose a display or record all screens as separate MP4 videos with system audio using Control-Option-Command-R; live preview picker on macOS 14+, optional microphone on macOS 15+, with local files and notifications. Files use `Screen yyyy-MM-dd HH.mm.ss.mp4`, adding the display name for multiple videos.
 - **Dictation:** on-device voice-to-text from the default microphone, toggled from the menu or Control-Option-Command-T, with the transcript copied to the clipboard.
 
 ## Protection rules

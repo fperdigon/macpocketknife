@@ -67,6 +67,23 @@ public struct NoticeComposer: NoticeComposing {
                body: "\(savedFile.lastPathComponent)\nFolder: \(savedFile.deletingLastPathComponent().path)")
     }
 
+    public func composeScreenRecording(savedFiles: [URL], interruptedDisplays: [String] = []) -> Notice {
+        let title: String
+        var body: String
+        if let first = savedFiles.first {
+            let single = composeScreenRecording(savedFile: first)
+            title = savedFiles.count == 1 ? single.title : "\(savedFiles.count) screen recordings saved"
+            body = single.body
+        } else {
+            title = "Screen recording ended"
+            body = "No usable video was saved."
+        }
+        if !interruptedDisplays.isEmpty {
+            body += "\nSharing ended early: " + interruptedDisplays.joined(separator: ", ") + "."
+        }
+        return Notice(kind: .info, title: title, body: body)
+    }
+
     public func composeScreenRecording(failure: ScreenRecordingFailure) -> Notice {
         Notice(kind: .info, title: "Screen recording unavailable", body: failure.message)
     }

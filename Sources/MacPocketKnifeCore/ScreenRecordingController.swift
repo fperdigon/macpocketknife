@@ -19,15 +19,41 @@ public final class ScreenRecordingController {
     public enum State: Equatable { case idle, starting, recording, stopping, error }
     public private(set) var state: State = .idle
     public private(set) var lastError: String?
+    public private(set) var lastNotice: String?
     public private(set) var elapsedSeconds = 0
-    public private(set) var lastSavedFile: URL?
+    public private(set) var lastSavedFiles: [URL] = []
+    public var lastSavedFile: URL? { lastSavedFiles.first }
     public var onChange: (@MainActor () -> Void)?
-    private let recorder: any ScreenRecording
+
+    @MainActor
+    private final class Session {
+        let recorder: any ScreenRecording
+        let display: DisplayInfo?
+        var ended = false
+        var didStart = false
+        var stopTask: Task<URL?, Error>?
+        init(recorder: any ScreenRecording, display: DisplayInfo?) {
+            self.recorder = recorder
+            self.display = display
+        }
+        func stop() -> Task<URL?, Error> {
+            if let stopTask { return stopTask }
+            recorder.onFailure = nil
+            let task: Task<URL?, Error> = Task { try await recorder.stop() }
+            stopTask = task
+            return task
+        }
+    }
+    private let factory: any ScreenRecordingFactory
+    private let displays: any ScreenRecordingDisplayProviding
+    private let picker: any ScreenRecordingPicking
     private let permission: any ScreenRecordingPermissionProviding
     private let disk: any FreeDiskSpaceProviding
     private let files: any RecordingFileManaging
     private let scheduler: any KeepAwakeScheduling
     private let notices: any AlertNotifying
+    private var sessions: [Session] = []
+    private var interruptedDisplays: [String] = []
     private var operation: Task<Void, Never>?
     private var cancelTick: (@Sendable () -> Void)?
     private var startedAt: Date?
@@ -40,17 +66,22 @@ public final class ScreenRecordingController {
     }
 
     public static func make(
-        recorder: any ScreenRecording, permission: any ScreenRecordingPermissionProviding,
+        factory: any ScreenRecordingFactory, displays: any ScreenRecordingDisplayProviding,
+        picker: any ScreenRecordingPicking, permission: any ScreenRecordingPermissionProviding,
         disk: any FreeDiskSpaceProviding, files: any RecordingFileManaging, notices: any AlertNotifying
     ) -> ScreenRecordingController {
-        ScreenRecordingController(recorder: recorder, permission: permission, disk: disk,
-                                  files: files, scheduler: KeepAwakeScheduler(), notices: notices)
+        ScreenRecordingController(factory: factory, displays: displays, picker: picker,
+                                  permission: permission, disk: disk, files: files,
+                                  scheduler: KeepAwakeScheduler(), notices: notices)
     }
 
-    public init(recorder: any ScreenRecording, permission: any ScreenRecordingPermissionProviding,
+    public init(factory: any ScreenRecordingFactory, displays: any ScreenRecordingDisplayProviding,
+                picker: any ScreenRecordingPicking, permission: any ScreenRecordingPermissionProviding,
                 disk: any FreeDiskSpaceProviding, files: any RecordingFileManaging,
                 scheduler: any KeepAwakeScheduling, notices: any AlertNotifying) {
-        self.recorder = recorder
+        self.factory = factory
+        self.displays = displays
+        self.picker = picker
         self.permission = permission
         self.disk = disk
         self.files = files
@@ -58,27 +89,31 @@ public final class ScreenRecordingController {
         self.notices = notices
     }
 
-    public func toggle(settings: AppSettings) {
+    public func toggle(settings: AppSettings, target: ScreenRecordingTarget? = nil) {
         switch state {
         case .starting:
             stopRequested = true
+            picker.cancel()
             state = .stopping
             onChange?()
         case .recording: finish(failure: nil)
         case .stopping: break
-        case .idle, .error: start(settings: settings.validated())
+        case .idle, .error: start(settings: settings.validated(), target: target)
         }
     }
 
-    public func stopAndWait() async {
+    @discardableResult
+    public func stopAndWait() async -> [URL] {
         if state == .starting {
             stopRequested = true
+            picker.cancel()
             state = .stopping
             onChange?()
         } else if state == .recording {
             finish(failure: nil)
         }
         await operation?.value
+        return lastSavedFiles
     }
 
     public func showRecordings(folderPath: String) {
@@ -89,40 +124,111 @@ public final class ScreenRecordingController {
         } catch { report(.folderUnavailable) }
     }
 
-    private func start(settings: AppSettings) {
+    private func start(settings: AppSettings, target: ScreenRecordingTarget?) {
         lastError = nil
-        lastSavedFile = nil
+        lastNotice = nil
+        lastSavedFiles = []
+        sessions = []
+        interruptedDisplays = []
         elapsedSeconds = 0
         stopRequested = false
         pendingFailure = nil
-        guard permission.requestAccessIfNeeded() else { report(.permissionDenied); return }
-        let folder = URL(fileURLWithPath: settings.screenRecordingFolder, isDirectory: true)
-        let destination: URL
-        do {
-            try files.createFolder(folder)
-            guard try disk.availableBytes(at: folder) >= 1_000_000_000 else { report(.lowDiskSpace); return }
-            destination = ScreenRecordingFiles.destination(date: scheduler.now, folder: folder, exists: files.exists)
-        } catch { report(.folderUnavailable); return }
-        self.folder = folder
         state = .starting
-        recorder.onFailure = { [weak self] failure in
-            guard let self else { return }
-            if self.state == .starting || self.state == .stopping {
-                self.stopRequested = true
-                self.pendingFailure = failure
-            } else if self.state == .recording {
-                self.finish(failure: failure)
-            }
-        }
-        let configuration = ScreenRecordingConfiguration(
-            frameRate: settings.screenRecordingFrameRate, showsCursor: settings.screenRecordingShowsCursor,
-            includesMicrophone: settings.screenRecordingIncludesMicrophone
-        )
         onChange?()
         operation = Task { [self] in
             do {
-                try await recorder.start(configuration: configuration, destination: destination)
-                if stopRequested { await finalize(failure: pendingFailure); return }
+                guard !stopRequested else {
+                    state = .idle
+                    onChange?()
+                    return
+                }
+                var requested = target ?? settings.screenRecordingTarget
+                var content: (any ScreenRecordingContent)?
+                if requested == .askEachTime {
+                    if picker.isSupported {
+                        content = try await picker.chooseContent()
+                        guard content != nil, !stopRequested else {
+                            state = .idle
+                            onChange?()
+                            return
+                        }
+                    } else {
+                        requested = .mainDisplay
+                        lastNotice = "Choosing with preview requires macOS 14. The main display is used meanwhile."
+                    }
+                }
+                var selected: [DisplayInfo?] = [nil]
+                if content == nil {
+                    guard let resolution = try ScreenRecordingTargets.resolve(requested, displays: displays.connectedDisplays()) else {
+                        state = .idle
+                        onChange?()
+                        return
+                    }
+                    selected = resolution.displays.map { Optional($0) }
+                    if resolution.fellBack {
+                        lastNotice = "The selected display is not connected. Recording the main display instead."
+                    }
+                }
+                guard permission.requestAccessIfNeeded() else { throw ScreenRecordingFailure.permissionDenied }
+                let folder = URL(fileURLWithPath: settings.screenRecordingFolder, isDirectory: true)
+                do {
+                    try files.createFolder(folder)
+                    guard try disk.availableBytes(at: folder) >= 1_000_000_000 else {
+                        throw ScreenRecordingFailure.lowDiskSpace
+                    }
+                } catch let failure as ScreenRecordingFailure where failure == .lowDiskSpace {
+                    throw failure
+                } catch { throw ScreenRecordingFailure.folderUnavailable }
+                self.folder = folder
+                let configuration = ScreenRecordingConfiguration(
+                    frameRate: settings.screenRecordingFrameRate, showsCursor: settings.screenRecordingShowsCursor,
+                    includesMicrophone: settings.screenRecordingIncludesMicrophone
+                )
+                var reserved: Set<String> = []
+                var starts: [Task<Void, Error>] = []
+                let date = scheduler.now
+                let selectedContent: (any ScreenRecordingContent)? = content
+                for display in selected {
+                    let session = Session(recorder: factory.makeRecorder(), display: display)
+                    sessions.append(session)
+                    session.recorder.onFailure = { [weak self, weak session] failure in
+                        guard let self, let session else { return }
+                        self.streamEnded(session, failure: failure)
+                    }
+                    let name: String? = selected.count > 1 ? display?.name : nil
+                    let destination = ScreenRecordingFiles.destination(date: date, folder: folder, displayName: name) {
+                        reserved.contains($0.lastPathComponent.precomposedStringWithCanonicalMapping.lowercased()) || self.files.exists($0)
+                    }
+                    reserved.insert(destination.lastPathComponent.precomposedStringWithCanonicalMapping.lowercased())
+                    let task: Task<Void, Error> = Task {
+                        do {
+                            try await session.recorder.start(configuration: configuration,
+                                destination: destination, display: display, content: selectedContent)
+                            session.didStart = true
+                            if stopRequested { _ = session.stop() }
+                        } catch {
+                            stopRequested = true
+                            state = .stopping
+                            _ = session.stop()
+                            for started in sessions where started.didStart { _ = started.stop() }
+                            onChange?()
+                            throw error
+                        }
+                    }
+                    starts.append(task)
+                }
+                // Launch every stream before awaiting any of them; drain every start before finalizing.
+                var startFailure: ScreenRecordingFailure?
+                for task in starts {
+                    do { try await task.value }
+                    catch { startFailure = (error as? ScreenRecordingFailure) ?? .captureFailed }
+                }
+                if let startFailure { await finalize(failure: startFailure); return }
+                if stopRequested || sessions.allSatisfy({ $0.ended }) {
+                    await finalize(failure: pendingFailure)
+                    return
+                }
+                for session in sessions where session.ended { _ = session.stop() }
                 startedAt = scheduler.now
                 state = .recording
                 tick()
@@ -130,6 +236,17 @@ public final class ScreenRecordingController {
             } catch {
                 await finalize(failure: (error as? ScreenRecordingFailure) ?? .captureFailed)
             }
+        }
+    }
+
+    private func streamEnded(_ session: Session, failure: ScreenRecordingFailure?) {
+        guard !session.ended, state == .starting || state == .recording else { return }
+        session.ended = true
+        if sessions.count > 1 { interruptedDisplays.append(session.display?.name ?? "Selected content") }
+        if let failure { pendingFailure = failure }
+        if state == .recording {
+            _ = session.stop()
+            if sessions.allSatisfy({ $0.ended }) { finish(failure: pendingFailure) }
         }
     }
 
@@ -163,16 +280,21 @@ public final class ScreenRecordingController {
 
     private func finalize(failure: ScreenRecordingFailure?) async {
         state = .stopping
-        recorder.onFailure = nil
         cancelTick?()
         cancelTick = nil
-        var finalFailure = failure
-        do {
-            if let url = try await recorder.stop() {
-                lastSavedFile = url
-                await notices.deliver(NoticeComposer().composeScreenRecording(savedFile: url))
-            }
-        } catch { finalFailure = (error as? ScreenRecordingFailure) ?? .writingFailed }
+        var finalFailure = failure ?? pendingFailure
+        let stops = sessions.map { $0.stop() }
+        for task in stops {
+            do {
+                if let url = try await task.value { lastSavedFiles.append(url) }
+            } catch { finalFailure = (error as? ScreenRecordingFailure) ?? .writingFailed }
+        }
+        if !lastSavedFiles.isEmpty || !interruptedDisplays.isEmpty {
+            let notice = NoticeComposer().composeScreenRecording(savedFiles: lastSavedFiles,
+                                                                interruptedDisplays: interruptedDisplays)
+            await notices.deliver(notice)
+        }
+        sessions = []
         startedAt = nil
         state = .idle
         if let finalFailure { report(finalFailure) } else { onChange?() }

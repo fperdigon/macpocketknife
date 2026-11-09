@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import AppKit
-import AVFoundation
+@preconcurrency import AppKit
+@preconcurrency import AVFoundation
 import CoreGraphics
 import MacPocketKnifeCore
 @preconcurrency import ScreenCaptureKit
@@ -217,20 +217,36 @@ final class ScreenCaptureKitRecorder: ScreenRecording {
     private var output: RecordingOutput?
     private var generation = 0
 
-    func start(configuration: ScreenRecordingConfiguration, destination: URL) async throws {
+    func start(configuration: ScreenRecordingConfiguration, destination: URL,
+               display requestedDisplay: DisplayInfo?, content pickedContent: (any ScreenRecordingContent)?) async throws {
         if configuration.includesMicrophone {
             if #available(macOS 15.0, *) {
                 guard await AVCaptureDevice.requestAccess(for: .audio) else { throw ScreenRecordingFailure.microphoneDenied }
             }
         }
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-        guard let display = content.displays.first(where: { $0.displayID == CGMainDisplayID() }) else {
-            throw ScreenRecordingFailure.noDisplay
+        let filter: SCContentFilter
+        let width: Int
+        let height: Int
+        if #available(macOS 14.0, *), let picked = pickedContent as? PickedRecordingContent {
+            filter = picked.filter
+            let info = SCShareableContent.info(for: filter)
+            width = Int(info.contentRect.width * CGFloat(info.pointPixelScale))
+            height = Int(info.contentRect.height * CGFloat(info.pointPixelScale))
+        } else {
+            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            let display = content.displays.first { candidate in
+                if let requestedDisplay {
+                    return RecordingDisplays.uuid(for: candidate.displayID) == requestedDisplay.uuid
+                }
+                return candidate.displayID == CGMainDisplayID()
+            }
+            guard let display, let mode = CGDisplayCopyDisplayMode(display.displayID) else {
+                throw ScreenRecordingFailure.noDisplay
+            }
+            width = mode.pixelWidth
+            height = mode.pixelHeight
+            filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
         }
-        // Display modes expose actual backing pixels, including Retina/scaled modes.
-        guard let mode = CGDisplayCopyDisplayMode(display.displayID) else { throw ScreenRecordingFailure.noDisplay }
-        let width = mode.pixelWidth
-        let height = mode.pixelHeight
         guard width > 0, height > 0 else { throw ScreenRecordingFailure.noDisplay }
         let config = SCStreamConfiguration()
         config.width = width
@@ -260,7 +276,6 @@ final class ScreenCaptureKitRecorder: ScreenRecording {
             }
         }
         self.output = output
-        let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
         let stream = SCStream(filter: filter, configuration: config, delegate: output)
         self.stream = stream
         try stream.addStreamOutput(output, type: .screen, sampleHandlerQueue: output.queue)
