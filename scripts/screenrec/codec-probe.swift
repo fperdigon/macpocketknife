@@ -29,16 +29,42 @@ struct ProbeCase {
     let pcm: Bool
 }
 
+enum ProbeResult {
+    case short(Int, Bool)
+    case long(frames: Int, bytes: Int, readable: Bool, duration: Double)
+}
+
+struct LongVideoCase {
+    let name: String
+    let codec: AVVideoCodecType
+    var bgra = false
+    var noBFrames = false
+    var software = false
+
+    var fileType: AVFileType { codec == .h264 || codec == .hevc ? .mp4 : .mov }
+    var fileExtension: String { fileType == .mp4 ? "mp4" : "mov" }
+}
+
+let longCases: [LongVideoCase] = [
+    LongVideoCase(name: "h264-long", codec: .h264),
+    LongVideoCase(name: "h264-long-nobframes", codec: .h264, noBFrames: true),
+    LongVideoCase(name: "h264-long-sw", codec: .h264, software: true),
+    LongVideoCase(name: "hevc-long", codec: .hevc),
+    LongVideoCase(name: "prores-long", codec: .proRes422),
+    LongVideoCase(name: "jpeg-long", codec: .jpeg),
+    LongVideoCase(name: "h264-long-bgra", codec: .h264, bgra: true)
+]
+
 final class ResultBox: @unchecked Sendable {
     private let lock = NSLock()
-    private var stored: Result<(Int, Bool), Error>?
+    private var stored: Result<ProbeResult, Error>?
 
-    func set(_ value: Result<(Int, Bool), Error>) {
+    func set(_ value: Result<ProbeResult, Error>) {
         lock.lock(); defer { lock.unlock() }
         stored = value
     }
 
-    func get() -> Result<(Int, Bool), Error>? {
+    func get() -> Result<ProbeResult, Error>? {
         lock.lock(); defer { lock.unlock() }
         return stored
     }
@@ -231,6 +257,122 @@ func run(_ probe: ProbeCase) throws -> (Int, Bool) {
     return (bytes, readable)
 }
 
+// Fill each row using its actual stride, including the separate 420v Y and CbCr planes.
+func fillLongFrame(_ pixel: CVPixelBuffer, frame: Int, bgra: Bool) throws {
+    let status = CVPixelBufferLockBaseAddress(pixel, [])
+    guard status == kCVReturnSuccess else {
+        throw NSError(domain: "Pixel buffer lock failed", code: Int(status))
+    }
+    defer { CVPixelBufferUnlockBaseAddress(pixel, []) }
+    let colour = frame / 30
+    if bgra {
+        guard let base = CVPixelBufferGetBaseAddress(pixel) else {
+            throw NSError(domain: "Missing BGRA base address", code: 1)
+        }
+        for y in 0..<720 {
+            let row = base.advanced(by: y * CVPixelBufferGetBytesPerRow(pixel)).assumingMemoryBound(to: UInt8.self)
+            for x in 0..<1280 {
+                row[x * 4] = UInt8(32 + colour * 17)
+                row[x * 4 + 1] = UInt8(224 - colour * 16)
+                row[x * 4 + 2] = UInt8(40 + colour * 18)
+                row[x * 4 + 3] = 255
+            }
+        }
+    } else {
+        guard CVPixelBufferGetPlaneCount(pixel) == 2,
+              let yBase = CVPixelBufferGetBaseAddressOfPlane(pixel, 0),
+              let uvBase = CVPixelBufferGetBaseAddressOfPlane(pixel, 1) else {
+            throw NSError(domain: "Missing 420v planes", code: 1)
+        }
+        for y in 0..<720 {
+            memset(yBase.advanced(by: y * CVPixelBufferGetBytesPerRowOfPlane(pixel, 0)), 32 + Int32(colour * 17), 1280)
+        }
+        for y in 0..<360 {
+            let row = uvBase.advanced(by: y * CVPixelBufferGetBytesPerRowOfPlane(pixel, 1)).assumingMemoryBound(to: UInt8.self)
+            for x in 0..<640 {
+                row[x * 2] = UInt8(64 + colour * 11)
+                row[x * 2 + 1] = UInt8(192 - colour * 11)
+            }
+        }
+    }
+}
+
+func runLongVideo(_ probe: LongVideoCase) throws -> ProbeResult {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("codec-probe-\(UUID().uuidString).\(probe.fileExtension)")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let writer = try AVAssetWriter(outputURL: url, fileType: probe.fileType)
+    var settings: [String: Any] = [
+        AVVideoCodecKey: probe.codec, AVVideoWidthKey: 1280, AVVideoHeightKey: 720
+    ]
+    var compression: [String: Any] = [:]
+    if probe.codec == .h264 || probe.codec == .hevc {
+        compression[AVVideoAverageBitRateKey] = 4_000_000
+        compression[AVVideoExpectedSourceFrameRateKey] = 30
+    }
+    if probe.noBFrames {
+        compression[AVVideoAllowFrameReorderingKey] = false
+        compression[AVVideoProfileLevelKey] = AVVideoProfileLevelH264BaselineAutoLevel
+    }
+    if probe.codec == .jpeg { compression[AVVideoQualityKey] = 0.7 }
+    if !compression.isEmpty { settings[AVVideoCompressionPropertiesKey] = compression }
+    if probe.software {
+        settings[AVVideoEncoderSpecificationKey] = [
+            kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder as String: false
+        ]
+        emit("CASE \(probe.name): requesting software encoder (hardware acceleration disabled)")
+    }
+    guard writer.canApply(outputSettings: settings, forMediaType: .video) else {
+        throw NSError(domain: "Video settings unsupported (software encoder specification included=\(probe.software))", code: 1)
+    }
+    let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
+    input.expectsMediaDataInRealTime = false
+    let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
+        kCVPixelBufferPixelFormatTypeKey as String: probe.bgra ? kCVPixelFormatType_32BGRA : kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+        kCVPixelBufferWidthKey as String: 1280, kCVPixelBufferHeightKey as String: 720
+    ])
+    guard writer.canAdd(input) else { throw NSError(domain: "Video input unsupported", code: 2) }
+    writer.add(input)
+    guard writer.startWriting() else { throw writer.error ?? NSError(domain: "startWriting failed", code: 3) }
+    writer.startSession(atSourceTime: .zero)
+    for frame in 0..<360 {
+        let readinessDeadline = DispatchTime.now() + .seconds(3)
+        while !input.isReadyForMoreMediaData {
+            guard writer.status == .writing else {
+                throw writer.error ?? NSError(domain: "Writer stopped after \(frame) frames (status=\(writer.status.rawValue))", code: 4)
+            }
+            if DispatchTime.now() >= readinessDeadline {
+                emit("CASE \(probe.name): writer.status=\(writer.status.rawValue), error=\(String(describing: writer.error))")
+                emit("CASE \(probe.name): STALL after \(frame) frames")
+                // Each case has its own process; avoid teardown blocking on a wedged encoder.
+                exit(1)
+            }
+            Thread.sleep(forTimeInterval: 0.005)
+        }
+        try autoreleasepool {
+            var pixel: CVPixelBuffer?
+            guard let pool = adaptor.pixelBufferPool,
+                  CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixel) == kCVReturnSuccess,
+                  let pixel else { throw NSError(domain: "Pixel buffer allocation failed", code: 5) }
+            try fillLongFrame(pixel, frame: frame, bgra: probe.bgra)
+            guard adaptor.append(pixel, withPresentationTime: CMTime(value: Int64(frame), timescale: 30)) else {
+                throw writer.error ?? NSError(domain: "Video append failed after \(frame) frames", code: 6)
+            }
+        }
+    }
+    input.markAsFinished()
+    let done = DispatchSemaphore(value: 0)
+    writer.finishWriting { done.signal() }
+    guard done.wait(timeout: .now() + 12) == .success else {
+        throw NSError(domain: "finishWriting timed out after 360 frames", code: 7)
+    }
+    guard writer.status == .completed else { throw writer.error ?? NSError(domain: "Writer did not complete", code: 8) }
+    let bytes = (try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue ?? 0
+    let asset = AVURLAsset(url: url)
+    let duration = asset.duration.seconds
+    let readable = duration.isFinite && duration > 0 && !asset.tracks.isEmpty
+    return .long(frames: 360, bytes: bytes, readable: readable, duration: duration)
+}
+
 func check(_ status: OSStatus, _ operation: String) throws {
     emit("\(operation): OSStatus=\(status) (\(fourCC(UInt32(bitPattern: status))))")
     guard status == noErr else { throw NSError(domain: operation, code: Int(status)) }
@@ -295,10 +437,10 @@ let name = CommandLine.arguments[1]
 if name == "list" {
     printEncoderList()
     printAudioDiagnostics()
-    for name in cases.map(\.name) + extraCases { emit(name) }
+    for name in cases.map(\.name) + extraCases + longCases.map(\.name) { emit(name) }
     exit(0)
 }
-guard cases.contains(where: { $0.name == name }) || extraCases.contains(name) else {
+guard cases.contains(where: { $0.name == name }) || extraCases.contains(name) || longCases.contains(where: { $0.name == name }) else {
     emit("Unknown case: \(name); use list", to: .standardError)
     exit(64)
 }
@@ -307,18 +449,24 @@ let done = DispatchSemaphore(value: 0)
 let output = ResultBox()
 DispatchQueue.global(qos: .userInitiated).async {
     output.set(Result {
-        if name == "aac-converter-only" { return try runConverterOnly() }
-        if name == "aac-extaudiofile" { return try runExtAudioFile() }
-        return try run(cases.first { $0.name == name }!)
+        if let probe = longCases.first(where: { $0.name == name }) { return try runLongVideo(probe) }
+        if name == "aac-converter-only" { let (bytes, readable) = try runConverterOnly(); return .short(bytes, readable) }
+        if name == "aac-extaudiofile" { let (bytes, readable) = try runExtAudioFile(); return .short(bytes, readable) }
+        let (bytes, readable) = try run(cases.first { $0.name == name }!)
+        return .short(bytes, readable)
     })
     done.signal()
 }
-if done.wait(timeout: .now() + 15) == .timedOut {
-    emit("CASE \(name): HANG (15 s watchdog)")
+let watchdogSeconds = longCases.contains(where: { $0.name == name }) ? 40 : 15
+if done.wait(timeout: .now() + .seconds(watchdogSeconds)) == .timedOut {
+    emit("CASE \(name): FAIL HANG (\(watchdogSeconds) s watchdog)")
     exit(124)
 }
 switch output.get() {
-case .success(let (bytes, readable)):
+case .success(.long(let frames, let bytes, let readable, let duration)):
+    emit("CASE \(name): OK \(frames) frames, \(bytes) bytes, readable=\(readable ? "yes" : "no"), duration=\(String(format: "%.3f", duration))")
+    exit(0)
+case .success(.short(let bytes, let readable)):
     if name == "aac-converter-only" {
         emit("CASE \(name): OK AudioConverter created, OSStatus=0")
     } else {

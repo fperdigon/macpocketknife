@@ -27,7 +27,7 @@ permissions:
 jobs:
   probe:
     runs-on: macos-15
-    timeout-minutes: 8
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: Runner hardware
@@ -62,11 +62,15 @@ jobs:
           while IFS= read -r case_name; do
             case_log="$log_dir/$case_name.log"
             timeout_marker="$log_dir/$case_name.timeout"
+            case "$case_name" in
+              *-long|*-long-*|*-bgra) watchdog_seconds=60 ;;
+              *) watchdog_seconds=25 ;;
+            esac
             /tmp/codec-probe "$case_name" > "$case_log" 2>&1 &
             probe_pid=$!
             (
               # Clean up the sleep as well when the probe finishes early.
-              sleep 25 &
+              sleep "$watchdog_seconds" &
               sleep_pid=$!
               trap 'kill "$sleep_pid" 2>/dev/null; wait "$sleep_pid" 2>/dev/null' TERM
               wait "$sleep_pid"
