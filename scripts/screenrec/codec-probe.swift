@@ -13,6 +13,8 @@
 // limitations under the License.
 
 @preconcurrency import AVFoundation
+import AudioToolbox
+import CoreAudio
 import CoreMedia
 import CoreVideo
 import Foundation
@@ -43,27 +45,68 @@ final class ResultBox: @unchecked Sendable {
 }
 
 let cases: [ProbeCase] = [
-    ProbeCase(name: "H.264", fileType: .mp4, fileExtension: "mp4", videoCodec: .h264, audioFormat: nil, pcm: false),
-    ProbeCase(name: "HEVC", fileType: .mp4, fileExtension: "mp4", videoCodec: .hevc, audioFormat: nil, pcm: false),
-    ProbeCase(name: "JPEG/MJPEG", fileType: .mov, fileExtension: "mov", videoCodec: .jpeg, audioFormat: nil, pcm: false),
-    ProbeCase(name: "ProRes 422", fileType: .mov, fileExtension: "mov", videoCodec: .proRes422, audioFormat: nil, pcm: false),
-    ProbeCase(name: "AAC", fileType: .mp4, fileExtension: "mp4", videoCodec: nil, audioFormat: kAudioFormatMPEG4AAC, pcm: false),
-    ProbeCase(name: "Linear PCM 16-bit", fileType: .mov, fileExtension: "mov", videoCodec: nil, audioFormat: kAudioFormatLinearPCM, pcm: true),
-    ProbeCase(name: "Apple Lossless", fileType: .m4a, fileExtension: "m4a", videoCodec: nil, audioFormat: kAudioFormatAppleLossless, pcm: false)
+    ProbeCase(name: "h264", fileType: .mp4, fileExtension: "mp4", videoCodec: .h264, audioFormat: nil, pcm: false),
+    ProbeCase(name: "hevc", fileType: .mp4, fileExtension: "mp4", videoCodec: .hevc, audioFormat: nil, pcm: false),
+    ProbeCase(name: "jpeg", fileType: .mov, fileExtension: "mov", videoCodec: .jpeg, audioFormat: nil, pcm: false),
+    ProbeCase(name: "prores422", fileType: .mov, fileExtension: "mov", videoCodec: .proRes422, audioFormat: nil, pcm: false),
+    ProbeCase(name: "aac-mp4", fileType: .mp4, fileExtension: "mp4", videoCodec: nil, audioFormat: kAudioFormatMPEG4AAC, pcm: false),
+    ProbeCase(name: "aac-m4a", fileType: .m4a, fileExtension: "m4a", videoCodec: nil, audioFormat: kAudioFormatMPEG4AAC, pcm: false),
+    ProbeCase(name: "aac-mov", fileType: .mov, fileExtension: "mov", videoCodec: nil, audioFormat: kAudioFormatMPEG4AAC, pcm: false),
+    ProbeCase(name: "pcm-mov", fileType: .mov, fileExtension: "mov", videoCodec: nil, audioFormat: kAudioFormatLinearPCM, pcm: true),
+    ProbeCase(name: "alac-m4a", fileType: .m4a, fileExtension: "m4a", videoCodec: nil, audioFormat: kAudioFormatAppleLossless, pcm: false)
 ]
+let extraCases = ["aac-extaudiofile", "aac-converter-only"]
+
+// Write directly so a crash or watchdog exit cannot hide buffered diagnostics.
+func emit(_ message: String, to handle: FileHandle = .standardOutput) {
+    handle.write(Data((message + "\n").utf8))
+}
+
+func fourCC(_ value: UInt32) -> String {
+    let bytes = [24, 16, 8, 0].map { UInt8((value >> $0) & 0xff) }
+    return bytes.allSatisfy { (32...126).contains($0) }
+        ? "'" + String(bytes: bytes, encoding: .ascii)! + "'" : String(format: "0x%08x", value)
+}
+
+func pcmDescription() -> AudioStreamBasicDescription {
+    AudioStreamBasicDescription(mSampleRate: 48_000, mFormatID: kAudioFormatLinearPCM,
+        mFormatFlags: kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked,
+        mBytesPerPacket: 4, mFramesPerPacket: 1, mBytesPerFrame: 4,
+        mChannelsPerFrame: 2, mBitsPerChannel: 16, mReserved: 0)
+}
+
+func printAudioDiagnostics() {
+    var size: UInt32 = 0
+    var status = AudioFormatGetPropertyInfo(kAudioFormatProperty_EncodeFormatIDs, 0, nil, &size)
+    if status == noErr {
+        var formats = [AudioFormatID](repeating: 0, count: Int(size) / MemoryLayout<AudioFormatID>.size)
+        status = formats.withUnsafeMutableBytes {
+            AudioFormatGetProperty(kAudioFormatProperty_EncodeFormatIDs, 0, nil, &size, $0.baseAddress!)
+        }
+        emit("AudioToolbox encoder format IDs: status=\(status) \(formats.prefix(Int(size) / 4).map(fourCC).joined(separator: ", "))", to: .standardError)
+    } else {
+        emit("AudioToolbox encoder format IDs: unavailable (OSStatus=\(status))", to: .standardError)
+    }
+    var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+        mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+    var device = AudioDeviceID(kAudioObjectUnknown)
+    size = UInt32(MemoryLayout.size(ofValue: device))
+    status = AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &device)
+    emit("Default output device: id=\(device), OSStatus=\(status)", to: .standardError)
+}
 
 func printEncoderList() {
     var list: CFArray?
     let status = VTCopyVideoEncoderList(nil, &list)
     guard status == noErr, let entries = list as? [[String: Any]] else {
-        print("VideoToolbox encoders: unavailable (status \(status))")
+        emit("VideoToolbox encoders: unavailable (status \(status))", to: .standardError)
         return
     }
-    print("VideoToolbox encoders:")
+    emit("VideoToolbox encoders:", to: .standardError)
     for entry in entries {
         let codec = entry["CodecName"] as? String ?? "unknown codec"
         let hardware = (entry[kVTVideoEncoderList_IsHardwareAccelerated as String] as? Bool) ?? false
-        print("  \(codec): hardware accelerated=\(hardware ? "yes" : "no")")
+        emit("  \(codec): hardware accelerated=\(hardware ? "yes" : "no")", to: .standardError)
     }
 }
 
@@ -136,11 +179,7 @@ func run(_ probe: ProbeCase) throws -> (Int, Bool) {
         }
         input.markAsFinished()
     } else if let audioFormat = probe.audioFormat {
-        var asbd = AudioStreamBasicDescription(mSampleRate: 48_000, mFormatID: audioFormat,
-            mFormatFlags: probe.pcm ? (kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked) : 0,
-            mBytesPerPacket: probe.pcm ? 4 : 0, mFramesPerPacket: 1,
-            mBytesPerFrame: probe.pcm ? 4 : 0, mChannelsPerFrame: 2,
-            mBitsPerChannel: probe.pcm ? 16 : 0, mReserved: 0)
+        var asbd = pcmDescription()
         var format: CMAudioFormatDescription?
         guard CMAudioFormatDescriptionCreate(allocator: nil, asbd: &asbd, layoutSize: 0,
             layout: nil, magicCookieSize: 0, magicCookie: nil, extensions: nil,
@@ -183,26 +222,104 @@ func run(_ probe: ProbeCase) throws -> (Int, Bool) {
     return (bytes, readable)
 }
 
-printEncoderList()
-for probe in cases {
-    let done = DispatchSemaphore(value: 0)
-    let output = ResultBox()
-    DispatchQueue.global(qos: .userInitiated).async {
-        output.set(Result { try run(probe) })
-        done.signal()
-    }
-    if done.wait(timeout: .now() + 15) == .timedOut {
-        print("CASE \(probe.name): HANG")
-    } else {
-        let value = output.get()
-        switch value {
-        case .success(let (bytes, readable)):
-            print("CASE \(probe.name): OK \(bytes) bytes, readable=\(readable ? "yes" : "no")")
-        case .failure(let error):
-            print("CASE \(probe.name): FAIL \(error)")
-        case .none:
-            print("CASE \(probe.name): FAIL missing result")
-        }
-    }
+func check(_ status: OSStatus, _ operation: String) throws {
+    emit("\(operation): OSStatus=\(status) (\(fourCC(UInt32(bitPattern: status))))")
+    guard status == noErr else { throw NSError(domain: operation, code: Int(status)) }
 }
-exit(0)
+
+func runConverterOnly() throws -> (Int, Bool) {
+    var source = pcmDescription()
+    var destination = AudioStreamBasicDescription()
+    destination.mSampleRate = 48_000
+    destination.mFormatID = kAudioFormatMPEG4AAC
+    destination.mChannelsPerFrame = 2
+    var converter: AudioConverterRef?
+    let status = AudioConverterNew(&source, &destination, &converter)
+    try check(status, "AudioConverterNew LPCM -> AAC")
+    if let converter { try check(AudioConverterDispose(converter), "AudioConverterDispose") }
+    return (0, false)
+}
+
+func runExtAudioFile() throws -> (Int, Bool) {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("codec-probe-\(UUID().uuidString).m4a")
+    defer { try? FileManager.default.removeItem(at: url) }
+    var destination = AudioStreamBasicDescription()
+    destination.mSampleRate = 48_000
+    destination.mFormatID = kAudioFormatMPEG4AAC
+    destination.mChannelsPerFrame = 2
+    var size = UInt32(MemoryLayout.size(ofValue: destination))
+    try check(AudioFormatGetProperty(kAudioFormatProperty_FormatInfo, 0, nil, &size, &destination), "AAC format info")
+    var file: ExtAudioFileRef?
+    try check(ExtAudioFileCreateWithURL(url as CFURL, kAudioFileM4AType, &destination, nil,
+        AudioFileFlags.eraseFile.rawValue, &file), "ExtAudioFileCreateWithURL")
+    guard let file else { throw NSError(domain: "Missing ExtAudioFile", code: 1) }
+    var disposed = false
+    defer { if !disposed { ExtAudioFileDispose(file) } }
+    var source = pcmDescription()
+    try check(ExtAudioFileSetProperty(file, kExtAudioFileProperty_ClientDataFormat,
+        UInt32(MemoryLayout.size(ofValue: source)), &source), "ExtAudioFile client PCM format")
+    var samples = [Int16](repeating: 0, count: 48_000 * 2)
+    for frame in 0..<48_000 {
+        let value = Int16(sin(2 * Double.pi * 440 * Double(frame) / 48_000) * 12_000)
+        samples[frame * 2] = value
+        samples[frame * 2 + 1] = value
+    }
+    let status = samples.withUnsafeMutableBytes { bytes -> OSStatus in
+        var buffer = AudioBufferList(mNumberBuffers: 1, mBuffers: AudioBuffer(
+            mNumberChannels: 2, mDataByteSize: UInt32(bytes.count), mData: bytes.baseAddress))
+        return ExtAudioFileWrite(file, 48_000, &buffer)
+    }
+    try check(status, "ExtAudioFileWrite (1 s, 48 kHz stereo sine)")
+    let closeStatus = ExtAudioFileDispose(file)
+    disposed = true
+    try check(closeStatus, "ExtAudioFileDispose")
+    let bytes = (try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue ?? 0
+    let asset = AVURLAsset(url: url)
+    return (bytes, asset.duration.seconds.isFinite && asset.duration.seconds > 0 && !asset.tracks.isEmpty)
+}
+
+guard CommandLine.arguments.count == 2 else {
+    emit("Usage: codec-probe <list|case-name>", to: .standardError)
+    exit(64)
+}
+let name = CommandLine.arguments[1]
+if name == "list" {
+    printEncoderList()
+    printAudioDiagnostics()
+    for name in cases.map(\.name) + extraCases { emit(name) }
+    exit(0)
+}
+guard cases.contains(where: { $0.name == name }) || extraCases.contains(name) else {
+    emit("Unknown case: \(name); use list", to: .standardError)
+    exit(64)
+}
+emit("CASE \(name): START")
+let done = DispatchSemaphore(value: 0)
+let output = ResultBox()
+DispatchQueue.global(qos: .userInitiated).async {
+    output.set(Result {
+        if name == "aac-converter-only" { return try runConverterOnly() }
+        if name == "aac-extaudiofile" { return try runExtAudioFile() }
+        return try run(cases.first { $0.name == name }!)
+    })
+    done.signal()
+}
+if done.wait(timeout: .now() + 15) == .timedOut {
+    emit("CASE \(name): HANG (15 s watchdog)")
+    exit(124)
+}
+switch output.get() {
+case .success(let (bytes, readable)):
+    if name == "aac-converter-only" {
+        emit("CASE \(name): OK AudioConverter created, OSStatus=0")
+    } else {
+        emit("CASE \(name): OK \(bytes) bytes, readable=\(readable ? "yes" : "no")")
+    }
+    exit(0)
+case .failure(let error):
+    emit("CASE \(name): FAIL \(error)")
+    exit(1)
+case .none:
+    emit("CASE \(name): FAIL missing result")
+    exit(1)
+}
