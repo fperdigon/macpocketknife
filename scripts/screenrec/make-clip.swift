@@ -90,18 +90,23 @@ final class ClipProgress: @unchecked Sendable {
     }
 }
 
-func waitUntilReady(_ input: AVAssetWriterInput, writer: AVAssetWriter, progress: ClipProgress) throws {
-    let deadline = DispatchTime.now() + .seconds(10)
-    while !input.isReadyForMoreMediaData {
-        guard writer.status == .writing else {
-            throw writer.error ?? NSError(domain: "Writer stopped while waiting for \(input.mediaType)", code: 1)
-        }
-        guard DispatchTime.now() < deadline else {
-            progress.printStatus("TIMEOUT waiting for \(input.mediaType) after 10s")
-            exit(3)
-        }
-        Thread.sleep(forTimeInterval: 0.001)
+// After setup, each producer's input, adaptor and mutable state belong to its serial queue.
+final class ClipProducer: @unchecked Sendable {
+    let input: AVAssetWriterInput
+    let adaptor: AVAssetWriterInputPixelBufferAdaptor?
+    var nextIndex: Int = 0
+    var finished: Bool = false
+
+    init(input: AVAssetWriterInput, adaptor: AVAssetWriterInputPixelBufferAdaptor? = nil) {
+        self.input = input
+        self.adaptor = adaptor
     }
+}
+
+func failAppending(_ writer: AVAssetWriter) -> Never {
+    let error: Error = writer.error ?? NSError(domain: "Writer failed to append media", code: 1)
+    FileHandle.standardError.write(Data("make-clip: \(error)\n".utf8))
+    exit(1)
 }
 
 func makeClip(_ path: String, silent: Bool, shuffled: Bool) throws {
@@ -136,7 +141,6 @@ func makeClip(_ path: String, silent: Bool, shuffled: Bool) throws {
     writer.add(audio)
     guard writer.startWriting() else { throw writer.error! }
     writer.startSession(atSourceTime: .zero)
-    // Interleave inputs so neither encoder can block waiting for the other track.
     var format: CMAudioFormatDescription?
     var asbd = AudioStreamBasicDescription(mSampleRate: 48_000, mFormatID: kAudioFormatLinearPCM,
         mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked,
@@ -144,66 +148,99 @@ func makeClip(_ path: String, silent: Bool, shuffled: Bool) throws {
         mChannelsPerFrame: 1, mBitsPerChannel: 32, mReserved: 0)
     CMAudioFormatDescriptionCreate(allocator: nil, asbd: &asbd, layoutSize: 0, layout: nil,
         magicCookieSize: 0, magicCookie: nil, extensions: nil, formatDescriptionOut: &format)
-    for frame in 0..<360 {
-        let slot = shuffled ? 11 - frame / 30 : frame / 30
-        try waitUntilReady(video, writer: writer, progress: progress)
-        var buffer: CVPixelBuffer?
-        CVPixelBufferPoolCreatePixelBuffer(nil, adaptor.pixelBufferPool!, &buffer)
-        let pixel = buffer!
-        CVPixelBufferLockBaseAddress(pixel, [])
-        let color = ycbcrPalette[slot]
-        let yBytes = CVPixelBufferGetBaseAddressOfPlane(pixel, 0)!.assumingMemoryBound(to: UInt8.self)
-        let yStride = CVPixelBufferGetBytesPerRowOfPlane(pixel, 0)
-        for row in 0..<720 {
-            yBytes.advanced(by: row * yStride).update(repeating: color[0], count: 1280)
-        }
-        let chroma = CVPixelBufferGetBaseAddressOfPlane(pixel, 1)!.assumingMemoryBound(to: UInt8.self)
-        let chromaStride = CVPixelBufferGetBytesPerRowOfPlane(pixel, 1)
-        for row in 0..<360 {
-            let bytes = chroma.advanced(by: row * chromaStride)
-            for column in 0..<640 {
-                bytes[column * 2] = color[1]
-                bytes[column * 2 + 1] = color[2]
+    let audioFormat: CMAudioFormatDescription = format!
+    let producers: DispatchGroup = DispatchGroup()
+    let videoQueue: DispatchQueue = DispatchQueue(label: "make-clip.video")
+    let audioQueue: DispatchQueue = DispatchQueue(label: "make-clip.audio")
+    let videoProducer: ClipProducer = ClipProducer(input: video, adaptor: adaptor)
+    let audioProducer: ClipProducer = ClipProducer(input: audio)
+    producers.enter()
+    producers.enter()
+    // Let each input pull independently so writer interleaving cannot block its peer.
+    video.requestMediaDataWhenReady(on: videoQueue) {
+        guard !videoProducer.finished else { return }
+        let video: AVAssetWriterInput = videoProducer.input
+        let adaptor: AVAssetWriterInputPixelBufferAdaptor = videoProducer.adaptor!
+        while video.isReadyForMoreMediaData && videoProducer.nextIndex < 360 {
+            let frame: Int = videoProducer.nextIndex
+            let slot: Int = shuffled ? 11 - frame / 30 : frame / 30
+            var buffer: CVPixelBuffer?
+            CVPixelBufferPoolCreatePixelBuffer(nil, adaptor.pixelBufferPool!, &buffer)
+            let pixel = buffer!
+            CVPixelBufferLockBaseAddress(pixel, [])
+            let color = ycbcrPalette[slot]
+            let yBytes = CVPixelBufferGetBaseAddressOfPlane(pixel, 0)!.assumingMemoryBound(to: UInt8.self)
+            let yStride = CVPixelBufferGetBytesPerRowOfPlane(pixel, 0)
+            for row in 0..<720 {
+                yBytes.advanced(by: row * yStride).update(repeating: color[0], count: 1280)
             }
-        }
-        CVBufferSetAttachment(pixel, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_709_2,
-                              .shouldPropagate)
-        CVPixelBufferUnlockBaseAddress(pixel, [])
-        guard adaptor.append(pixel, withPresentationTime: CMTime(value: Int64(frame), timescale: 30)) else {
-            throw writer.error!
-        }
-        progress.appended(video: true)
-        try waitUntilReady(audio, writer: writer, progress: progress)
-        var samples = [Float](repeating: 0, count: 1600)
-        for index in samples.indices {
-            let frameStart: Int = frame * 1600
-            let position: Int = frameStart + index
-            let positionInSecond: Int = position % 48_000
-            let phase: Double = Double(positionInSecond) / 48_000.0
-            if !silent && phase >= 0.04 && phase < 0.96 {
-                samples[index] = toneSample(slot: slot, position: position)
+            let chroma = CVPixelBufferGetBaseAddressOfPlane(pixel, 1)!.assumingMemoryBound(to: UInt8.self)
+            let chromaStride = CVPixelBufferGetBytesPerRowOfPlane(pixel, 1)
+            for row in 0..<360 {
+                let bytes = chroma.advanced(by: row * chromaStride)
+                for column in 0..<640 {
+                    bytes[column * 2] = color[1]
+                    bytes[column * 2 + 1] = color[2]
+                }
             }
+            CVBufferSetAttachment(pixel, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_709_2,
+                                  .shouldPropagate)
+            CVPixelBufferUnlockBaseAddress(pixel, [])
+            guard adaptor.append(pixel, withPresentationTime: CMTime(value: Int64(frame), timescale: 30)) else {
+                failAppending(progress.writer)
+            }
+            progress.appended(video: true)
+            videoProducer.nextIndex += 1
         }
-        var block: CMBlockBuffer?
-        CMBlockBufferCreateWithMemoryBlock(allocator: nil, memoryBlock: nil, blockLength: samples.count * 4,
-            blockAllocator: nil, customBlockSource: nil, offsetToData: 0,
-            dataLength: samples.count * 4, flags: 0, blockBufferOut: &block)
-        _ = samples.withUnsafeBytes { raw in
-            CMBlockBufferReplaceDataBytes(with: raw.baseAddress!, blockBuffer: block!, offsetIntoDestination: 0,
-                                          dataLength: raw.count)
+        if videoProducer.nextIndex == 360 {
+            videoProducer.finished = true
+            video.markAsFinished()
+            producers.leave()
         }
-        var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: 48_000),
-            presentationTimeStamp: CMTime(value: Int64(frame * 1600), timescale: 48_000), decodeTimeStamp: .invalid)
-        var sample: CMSampleBuffer?
-        var size = 4
-        CMSampleBufferCreateReady(allocator: nil, dataBuffer: block, formatDescription: format,
-            sampleCount: 1600, sampleTimingEntryCount: 1, sampleTimingArray: &timing,
-            sampleSizeEntryCount: 1, sampleSizeArray: &size, sampleBufferOut: &sample)
-        guard audio.append(sample!) else { throw writer.error! }
-        progress.appended(video: false)
     }
+    audio.requestMediaDataWhenReady(on: audioQueue) {
+        guard !audioProducer.finished else { return }
+        let audio: AVAssetWriterInput = audioProducer.input
+        while audio.isReadyForMoreMediaData && audioProducer.nextIndex < 360 {
+            let frame: Int = audioProducer.nextIndex
+            let slot: Int = shuffled ? 11 - frame / 30 : frame / 30
+            var samples = [Float](repeating: 0, count: 1600)
+            for index in samples.indices {
+                let frameStart: Int = frame * 1600
+                let position: Int = frameStart + index
+                let positionInSecond: Int = position % 48_000
+                let phase: Double = Double(positionInSecond) / 48_000.0
+                if !silent && phase >= 0.04 && phase < 0.96 {
+                    samples[index] = toneSample(slot: slot, position: position)
+                }
+            }
+            var block: CMBlockBuffer?
+            CMBlockBufferCreateWithMemoryBlock(allocator: nil, memoryBlock: nil, blockLength: samples.count * 4,
+                blockAllocator: nil, customBlockSource: nil, offsetToData: 0,
+                dataLength: samples.count * 4, flags: 0, blockBufferOut: &block)
+            _ = samples.withUnsafeBytes { raw in
+                CMBlockBufferReplaceDataBytes(with: raw.baseAddress!, blockBuffer: block!, offsetIntoDestination: 0,
+                                              dataLength: raw.count)
+            }
+            var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: 48_000),
+                presentationTimeStamp: CMTime(value: Int64(frame * 1600), timescale: 48_000), decodeTimeStamp: .invalid)
+            var sample: CMSampleBuffer?
+            var size = 4
+            CMSampleBufferCreateReady(allocator: nil, dataBuffer: block, formatDescription: audioFormat,
+                sampleCount: 1600, sampleTimingEntryCount: 1, sampleTimingArray: &timing,
+                sampleSizeEntryCount: 1, sampleSizeArray: &size, sampleBufferOut: &sample)
+            guard audio.append(sample!) else { failAppending(progress.writer) }
+            progress.appended(video: false)
+            audioProducer.nextIndex += 1
+        }
+        if audioProducer.nextIndex == 360 {
+            audioProducer.finished = true
+            audio.markAsFinished()
+            producers.leave()
+        }
+    }
+    producers.wait()
     writer.endSession(atSourceTime: CMTime(value: 12, timescale: 1))
-    video.markAsFinished(); audio.markAsFinished()
     let done = DispatchSemaphore(value: 0)
     writer.finishWriting { done.signal() }
     guard done.wait(timeout: .now() + .seconds(15)) == .success else {
