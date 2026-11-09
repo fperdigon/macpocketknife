@@ -335,6 +335,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 }
 
+RecordingSelfTest.runIfRequested()
+
 // Read-only CLI output must not depend on the AppKit launch event loop.
 if CommandLine.arguments.contains("--print-status") {
     let power = IOKitPowerMonitor().current

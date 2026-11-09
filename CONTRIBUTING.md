@@ -47,6 +47,64 @@ offline Spanish model. CI turns on Dictation for the throwaway runner user becau
 the runner has it disabled. The test exercises the recognizer on synthetic audio and does
 not cover the microphone, hotkey or clipboard path.
 
+## Screen recording tests
+
+Run `scripts/run-screenrec-test.sh` in a logged-in GUI session. It plays sound and
+flashes full-screen colours for about 15 seconds per attempt. Keep the Mac awake
+and unlocked, with an audio output device selected. The first run exits with
+`PERMISSION DENIED` (code 10) if access is missing. Enable ScreenRecTest in System
+Settings > Privacy & Security > Screen & System Audio Recording (use + and pick
+`build/ScreenRecTest.app` if it is not listed), then rerun. Local runs launch through
+LaunchServices so permission belongs to the bundle. The grant is tied to the exact
+build. After code changes, run
+`tccutil reset ScreenCapture io.github.fperdigon.macpocketknife.screenrectest`,
+re-add `build/ScreenRecTest.app`, and allow the one-time macOS consent dialog before
+rerunning the test; otherwise the dialog covers the screen and fails the colour
+check. The test never grants
+permission or changes audio devices locally. `--mic` is available only on the
+hidden recorder CLI; the end-to-end test checks system audio without a microphone.
+
+The test generates a deterministic 12-second H.264/AAC clip with twelve unique
+colour/tone pairs and short silent gaps. A synthetic clip is deliberately preferred
+over downloading a video: it is offline, reproducible, and has precisely aligned
+video and audio boundaries. A separate bundled AVPlayer app plays it while the
+shipped `ScreenCaptureKitRecorder.start(configuration:destination:)` / `stop()`
+path records the main display. No product settings are read or changed.
+
+The verifier requires video and audio tracks, non-silent PCM, matching durations,
+at least five ordered reference colours and tones (at least 85% of observed
+slots), and at least four matching boundaries with less than 300 ms A/V offset.
+It reports sequences, RMS/peak, durations, and mean/max sync error. All media,
+logs, and sample PNG frames remain in the printed `build/screenrec-test/` directory.
+The analysis can be checked independently without permission or full-screen playback:
+
+```sh
+swiftc -swift-version 6 scripts/screenrec/make-clip.swift -o /tmp/make-clip
+swiftc -swift-version 6 scripts/screenrec/verify.swift -o /tmp/verify
+/tmp/make-clip /tmp/reference.mp4
+/tmp/verify --selftest
+/tmp/verify /tmp/reference.mp4 /tmp/reference.mp4 --seconds 12
+/tmp/make-clip /tmp/silent.mp4 --silent
+/tmp/verify /tmp/reference.mp4 /tmp/silent.mp4 --seconds 12 # must fail
+```
+
+`--shuffled` generates reversed slots for another negative control. Use fresh output
+paths; the generator refuses to overwrite files. Media generation, playback and
+analysis use only macOS frameworks, with Python stdlib for orchestration.
+
+The experimental `screenrec-test` CI job currently allows failure and uploads all
+artifacts, with measurements in the step summary. With `--ci` or
+`GITHUB_ACTIONS=true`, it logs display/audio/SIP diagnostics, first attempts capture
+without TCC changes, and retries a permission failure once after granting the test
+bundle access on the disposable runner. **Use `--ci` only on disposable machines.**
+If the runner lacks an audio device or captures silence, an isolated best-effort
+fallback installs BlackHole with Homebrew, restarts coreaudiod and selects its
+output through CoreAudio. This optional CI experiment is the only third-party
+download; the normal test path needs none. If audio remains unavailable, exit 20
+and `AUDIO NOT CAPTURED` distinguish it from permission (10), usage (2), or other
+capture/correlation failures (1). Hosted VM audio support remains unproven; silence
+is a failure, never a skipped or successful test.
+
 ## Code style and tests
 
 Follow nearby sources: four-space indentation, Swift naming conventions,

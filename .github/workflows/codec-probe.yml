@@ -1,0 +1,91 @@
+# Copyright 2026 Francisco Perdigon Romero and contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: Codec probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Runner hardware
+        run: sw_vers; system_profiler SPDisplaysDataType SPHardwareDataType | head -60
+      - name: Compile and probe codecs
+        shell: bash
+        run: |
+          set +e
+          log_dir=$(mktemp -d)
+          append_log() {
+            cat "$1"
+            cat "$1" >> "$GITHUB_STEP_SUMMARY"
+          }
+          printf '```text\n' >> "$GITHUB_STEP_SUMMARY"
+          trap 'printf "\n```\n" >> "$GITHUB_STEP_SUMMARY"' EXIT
+
+          swiftc -swift-version 6 -target arm64-apple-macosx13.0 scripts/screenrec/codec-probe.swift -o /tmp/codec-probe > "$log_dir/compile.log" 2>&1
+          compile_status=$?
+          append_log "$log_dir/compile.log"
+          if [ "$compile_status" -ne 0 ]; then
+            exit "$compile_status"
+          fi
+
+          /tmp/codec-probe list > "$log_dir/cases" 2> "$log_dir/header.log"
+          list_status=$?
+          append_log "$log_dir/header.log"
+          append_log "$log_dir/cases"
+          if [ "$list_status" -ne 0 ]; then
+            exit "$list_status"
+          fi
+
+          while IFS= read -r case_name; do
+            case_log="$log_dir/$case_name.log"
+            timeout_marker="$log_dir/$case_name.timeout"
+            case "$case_name" in
+              *-long|*-long-*|*-bgra) watchdog_seconds=60 ;;
+              *) watchdog_seconds=25 ;;
+            esac
+            /tmp/codec-probe "$case_name" > "$case_log" 2>&1 &
+            probe_pid=$!
+            (
+              # Clean up the sleep as well when the probe finishes early.
+              sleep "$watchdog_seconds" &
+              sleep_pid=$!
+              trap 'kill "$sleep_pid" 2>/dev/null; wait "$sleep_pid" 2>/dev/null' TERM
+              wait "$sleep_pid"
+              if kill -0 "$probe_pid" 2>/dev/null; then
+                touch "$timeout_marker"
+                kill -KILL "$probe_pid" 2>/dev/null
+              fi
+            ) &
+            watchdog_pid=$!
+            wait "$probe_pid" 2>> "$case_log"
+            probe_status=$?
+            kill "$watchdog_pid" 2>/dev/null
+            wait "$watchdog_pid" 2>/dev/null
+            append_log "$case_log"
+            result="RESULT $case_name: exit=$probe_status"
+            if [ -f "$timeout_marker" ]; then
+              result="$result | TIMEOUT"
+            fi
+            printf '%s\n' "$result"
+            printf '%s\n' "$result" >> "$GITHUB_STEP_SUMMARY"
+          done < "$log_dir/cases"
+          exit 0

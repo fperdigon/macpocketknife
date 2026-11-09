@@ -115,6 +115,8 @@ Privacy & Security > Screen & System Audio Recording**, enable MacPocketKnife
 need to quit and relaunch the app after granting access, then start recording
 again. Permission guidance in the menu opens this pane. Microphone access is
 requested separately only if **Include microphone** is enabled.
+macOS may show a consent dialog for direct screen and audio access the first time
+you record (and periodically); it can appear in that recording.
 
 Capture uses native display pixels, H.264 video, and 48 kHz stereo AAC system
 audio. Only the main display is recorded; protected content may be blank or

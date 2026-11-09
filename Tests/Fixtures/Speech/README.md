@@ -38,3 +38,5 @@ Use `en` with `en-US-AriaNeural` and `es` with `es-US-PalomaNeural`.
 ## Caveat
 
 The licensing terms for reusing Edge TTS output have not been verified.
+
+The separate [screen recording test](../../../CONTRIBUTING.md#screen-recording-tests) generates its own offline colour/tone clip to check video and system audio capture.

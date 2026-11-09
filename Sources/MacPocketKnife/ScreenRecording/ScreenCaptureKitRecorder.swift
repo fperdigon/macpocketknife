@@ -64,6 +64,8 @@ private final class RecordingOutput: NSObject, SCStreamOutput, SCStreamDelegate,
     private let workingFile: URL
     private let failure: @Sendable (ScreenRecordingFailure?) -> Void
     private var firstVideoTime: CMTime?
+    private var lastVideoTime: CMTime?
+    private var latestTime: CMTime?
     private var wroteVideo = false
     private var closing = false
     private var reportedFailure = false
@@ -77,8 +79,12 @@ private final class RecordingOutput: NSObject, SCStreamOutput, SCStreamDelegate,
         let bitrate = ScreenRecordingFiles.bitrate(width: width, height: height, frameRate: frameRate)
         let compression: [String: Any] = [AVVideoAverageBitRateKey: bitrate,
                                           AVVideoExpectedSourceFrameRateKey: frameRate]
+        let colorProperties: [String: Any] = [AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
+                                               AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
+                                               AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2]
         let videoSettings: [String: Any] = [AVVideoCodecKey: AVVideoCodecType.h264,
                                             AVVideoWidthKey: width, AVVideoHeightKey: height,
+                                            AVVideoColorPropertiesKey: colorProperties,
                                             AVVideoCompressionPropertiesKey: compression]
         video = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
         let audioSettings: [String: Any] = [AVFormatIDKey: kAudioFormatMPEG4AAC,
@@ -126,7 +132,21 @@ private final class RecordingOutput: NSObject, SCStreamOutput, SCStreamDelegate,
         }
         guard input.isReadyForMoreMediaData else { return }
         if input.append(sampleBuffer) {
-            if type == .screen { wroteVideo = true }
+            if type == .screen {
+                wroteVideo = true
+                lastVideoTime = time
+            }
+            var sampleEnd: CMTime = time
+            let duration: CMTime = sampleBuffer.duration
+            if duration.isNumeric {
+                let end: CMTime = CMTimeAdd(time, duration)
+                if CMTimeCompare(end, sampleEnd) > 0 { sampleEnd = end }
+            }
+            if let latestTime {
+                if CMTimeCompare(sampleEnd, latestTime) > 0 { self.latestTime = sampleEnd }
+            } else {
+                latestTime = sampleEnd
+            }
         } else { reportWriterFailure() }
         if writer.status == .failed { reportWriterFailure() }
     }
@@ -154,6 +174,11 @@ private final class RecordingOutput: NSObject, SCStreamOutput, SCStreamDelegate,
                     writer.startSession(atSourceTime: .zero)
                 }
                 if writer.status == .writing {
+                    if firstVideoTime != nil, wroteVideo, let latestTime, let lastVideoTime,
+                       CMTimeCompare(latestTime, lastVideoTime) > 0 {
+                        // ScreenCaptureKit stops sending frames while the screen is static.
+                        writer.endSession(atSourceTime: latestTime)
+                    }
                     video.markAsFinished()
                     audio.markAsFinished()
                     microphone?.markAsFinished()
@@ -213,7 +238,9 @@ final class ScreenCaptureKitRecorder: ScreenRecording {
         config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(configuration.frameRate))
         config.showsCursor = configuration.showsCursor
         config.queueDepth = 6
-        config.pixelFormat = kCVPixelFormatType_32BGRA
+        config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+        config.colorSpaceName = CGColorSpace.sRGB
+        config.colorMatrix = CGDisplayStream.yCbCrMatrix_ITU_R_709_2
         config.capturesAudio = true
         config.excludesCurrentProcessAudio = true
         config.sampleRate = 48_000
