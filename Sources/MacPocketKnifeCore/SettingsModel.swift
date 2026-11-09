@@ -41,6 +41,7 @@ public final class SettingsModel: ObservableObject {
     }
 
     @Published public var dictationHotkeyError: String?
+    @Published public var screenRecordingHotkeyError: String?
 
     public var dictationLanguageSelection: String {
         get { settings.dictationLanguage ?? "" }

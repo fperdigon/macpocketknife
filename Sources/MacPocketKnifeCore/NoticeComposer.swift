@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import Foundation
+
 public protocol NoticeComposing: Sendable {
     func compose(alert: BatteryAlert, blockers: [String], estimate: BatteryEstimate) -> Notice
     func compose(action: PolicyAction) -> Notice
@@ -58,6 +60,15 @@ public struct NoticeComposer: NoticeComposing {
 
     public func composeDictation(failure: DictationFailure) -> Notice {
         Notice(kind: .info, title: "Dictation unavailable", body: failure.message)
+    }
+
+    public func composeScreenRecording(savedFile: URL) -> Notice {
+        Notice(kind: .info, title: "Screen recording saved",
+               body: "\(savedFile.lastPathComponent)\nFolder: \(savedFile.deletingLastPathComponent().path)")
+    }
+
+    public func composeScreenRecording(failure: ScreenRecordingFailure) -> Notice {
+        Notice(kind: .info, title: "Screen recording unavailable", body: failure.message)
     }
 
     /// Compose termination notices only after the corresponding action succeeds.

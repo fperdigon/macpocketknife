@@ -44,6 +44,12 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var dictationHotkeyEnabled: Bool = true
     public var dictationHotkeyKey: String = "T"
     public var dictationLanguage: String?
+    public var screenRecordingHotkeyEnabled = true
+    public var screenRecordingHotkeyKey = "R"
+    public var screenRecordingFrameRate = 30
+    public var screenRecordingShowsCursor = true
+    public var screenRecordingIncludesMicrophone = false
+    public var screenRecordingFolder = ScreenRecordingFiles.defaultFolder
     public var skippedVersion: String?
 
     public init(
@@ -66,7 +72,13 @@ public struct AppSettings: Codable, Equatable, Sendable {
 
     public static let dictationKeys = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ").map(String.init)
 
+    public var screenRecordingHotkeyConflicts: Bool {
+        screenRecordingHotkeyEnabled && dictationHotkeyEnabled && screenRecordingHotkeyKey == dictationHotkeyKey
+    }
+
     private enum CodingKeys: String, CodingKey {
+        case screenRecordingHotkeyEnabled, screenRecordingHotkeyKey, screenRecordingFrameRate
+        case screenRecordingShowsCursor, screenRecordingIncludesMicrophone, screenRecordingFolder
         case dictationHotkeyEnabled, dictationHotkeyKey, dictationLanguage
         case alerts, policy, keepAwakeDefaultDuration, telegram, launchAtLogin
         case updateChannel, checkForUpdatesAutomatically, skippedVersion, showOtherSleepBlockers
@@ -86,6 +98,12 @@ public struct AppSettings: Codable, Equatable, Sendable {
         dictationHotkeyEnabled = try container.decodeIfPresent(Bool.self, forKey: .dictationHotkeyEnabled) ?? true
         dictationHotkeyKey = try container.decodeIfPresent(String.self, forKey: .dictationHotkeyKey) ?? "T"
         dictationLanguage = try container.decodeIfPresent(String.self, forKey: .dictationLanguage)
+        screenRecordingHotkeyEnabled = try container.decodeIfPresent(Bool.self, forKey: .screenRecordingHotkeyEnabled) ?? true
+        screenRecordingHotkeyKey = try container.decodeIfPresent(String.self, forKey: .screenRecordingHotkeyKey) ?? "R"
+        screenRecordingFrameRate = try container.decodeIfPresent(Int.self, forKey: .screenRecordingFrameRate) ?? 30
+        screenRecordingShowsCursor = try container.decodeIfPresent(Bool.self, forKey: .screenRecordingShowsCursor) ?? true
+        screenRecordingIncludesMicrophone = try container.decodeIfPresent(Bool.self, forKey: .screenRecordingIncludesMicrophone) ?? false
+        screenRecordingFolder = try container.decodeIfPresent(String.self, forKey: .screenRecordingFolder) ?? ScreenRecordingFiles.defaultFolder
         skippedVersion = try container.decodeIfPresent(String.self, forKey: .skippedVersion)
     }
 
@@ -113,6 +131,11 @@ public struct AppSettings: Codable, Equatable, Sendable {
         }
         let key = dictationHotkeyKey.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         result.dictationHotkeyKey = Self.dictationKeys.contains(key) ? key : "T"
+        let screenKey = screenRecordingHotkeyKey.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        result.screenRecordingHotkeyKey = Self.dictationKeys.contains(screenKey) ? screenKey : "R"
+        result.screenRecordingFrameRate = screenRecordingFrameRate == 60 ? 60 : 30
+        let folder = screenRecordingFolder.trimmingCharacters(in: .whitespacesAndNewlines)
+        result.screenRecordingFolder = folder.isEmpty ? ScreenRecordingFiles.defaultFolder : NSString(string: folder).expandingTildeInPath
         return result
     }
 }

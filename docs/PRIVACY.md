@@ -26,6 +26,23 @@ those services are outside this app's control. Empty sessions leave the clipboar
 unchanged; errors discard the session. Recording is limited to ten minutes.
 Only dictation preferences (shortcut and language) are stored in UserDefaults.
 
+## Screen recording
+
+Screen recording uses Apple's ScreenCaptureKit and AVAssetWriter to save the main
+display and system audio locally as H.264/AAC MP4 files. The app's own audio is
+excluded. Microphone capture is optional, off by default, and available only on
+macOS 15 or later as a second audio track. Screen Recording permission is required;
+microphone permission is requested only when that option is enabled. Access can
+be revoked in System Settings > Privacy & Security.
+
+No recording content leaves the Mac through this feature. There is no telemetry,
+content logging, upload, or Telegram delivery. Saved notices are local only and
+include the file name and save-folder path. Screen recording preferences are
+stored in UserDefaults. Files remain in ~/Movies/MacPocketKnife or the folder you
+choose until you delete them; removing the app does not remove recordings.
+A folder managed by an external sync service may sync files under that service's
+settings. Choose a local folder if you do not want such syncing.
+
 ## Local storage
 
 The Telegram bot token belongs only in the macOS Keychain, as a generic-password
