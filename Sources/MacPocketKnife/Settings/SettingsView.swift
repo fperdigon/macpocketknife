@@ -28,13 +28,14 @@ struct SettingsView: View {
     @State private var operation: Task<Void, Never>?
 
     enum Tab: String, CaseIterable, Identifiable {
-        case general, protection, telegram, updates, about
+        case general, tools, protection, telegram, updates, about
 
         var id: String { rawValue }
 
         var label: String {
             switch self {
             case .general: return "General"
+            case .tools: return "Tools"
             case .protection: return "Protection"
             case .telegram: return "Telegram"
             case .updates: return "Updates"
@@ -45,6 +46,7 @@ struct SettingsView: View {
         var systemImage: String {
             switch self {
             case .general: return "gearshape"
+            case .tools: return "wrench.and.screwdriver"
             case .protection: return "battery.50"
             case .telegram: return "paperplane"
             case .updates: return "arrow.down.circle"
@@ -90,6 +92,7 @@ struct SettingsView: View {
     private var tabContent: some View {
         switch selection.selectedTab {
         case .general: GeneralPane(model: model, status: status)
+        case .tools: ToolsPane(model: model)
         case .protection: ProtectionPane(model: model)
         case .telegram:
             TelegramPane(
@@ -155,8 +158,36 @@ private struct GeneralPane: View {
     var body: some View {
         Form {
             generalSection
-            dictationSection
             if let status { Text(status).font(.callout).accessibilityLabel(status) }
+        }
+        .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+    }
+
+    private var generalSection: some View {
+        Section("General") {
+            Toggle("Keep awake indefinitely by default", isOn: $model.keepAwakeIndefinitely)
+            if model.settings.keepAwakeDefaultDuration != nil {
+                TextField("Default keep-awake duration (seconds)", value: Binding(
+                    get: { model.settings.keepAwakeDefaultDuration ?? 3600 },
+                    set: { model.settings.keepAwakeDefaultDuration = $0 }
+                ), format: .number)
+            }
+            Toggle("Launch at login", isOn: $model.launchAtLogin)
+            Text("Local notifications are always enabled.")
+                .font(.caption)
+        }
+    }
+}
+
+@MainActor
+private struct ToolsPane: View {
+    @ObservedObject var model: SettingsModel
+
+    var body: some View {
+        Form {
+            dictationSection
+            screenRecordingSection
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
@@ -184,18 +215,49 @@ private struct GeneralPane: View {
         }
     }
 
-    private var generalSection: some View {
-        Section("General") {
-            Toggle("Keep awake indefinitely by default", isOn: $model.keepAwakeIndefinitely)
-            if model.settings.keepAwakeDefaultDuration != nil {
-                TextField("Default keep-awake duration (seconds)", value: Binding(
-                    get: { model.settings.keepAwakeDefaultDuration ?? 3600 },
-                    set: { model.settings.keepAwakeDefaultDuration = $0 }
-                ), format: .number)
+    private var screenRecordingSection: some View {
+        Section("Screen recording") {
+            Toggle("Enable global shortcut (Control-Option-Command)", isOn: $model.settings.screenRecordingHotkeyEnabled)
+            Picker("Shortcut key", selection: $model.settings.screenRecordingHotkeyKey) {
+                ForEach(AppSettings.dictationKeys, id: \.self) { key in Text(key).tag(key) }
             }
-            Toggle("Launch at login", isOn: $model.launchAtLogin)
-            Text("Local notifications are always enabled.")
-                .font(.caption)
+            .disabled(!model.settings.screenRecordingHotkeyEnabled)
+            if model.settings.screenRecordingHotkeyConflicts {
+                Text("Choose a key different from the Dictation key. The screen recording shortcut is disabled until then.")
+                    .font(.caption).foregroundStyle(.red)
+            } else if let error = model.screenRecordingHotkeyError {
+                Text(error).font(.caption).foregroundStyle(.red)
+            }
+            Picker("Frame rate", selection: $model.settings.screenRecordingFrameRate) {
+                Text("30 fps").tag(30)
+                Text("60 fps").tag(60)
+            }
+            Toggle("Show cursor", isOn: $model.settings.screenRecordingShowsCursor)
+            if #available(macOS 15.0, *) {
+                Toggle("Include microphone", isOn: $model.settings.screenRecordingIncludesMicrophone)
+            } else {
+                Text("Include microphone requires macOS 15 or later.").font(.caption)
+            }
+            Text("System audio is included. The app's own audio is excluded.").font(.caption)
+            LabeledContent("Save folder") {
+                Text(model.settings.screenRecordingFolder).font(.caption).textSelection(.enabled)
+            }
+            HStack {
+                Button("Choose…", action: chooseFolder)
+                Button("Reset") { model.settings.screenRecordingFolder = ScreenRecordingFiles.defaultFolder }
+            }
+        }
+    }
+
+    private func chooseFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.directoryURL = URL(fileURLWithPath: model.settings.screenRecordingFolder, isDirectory: true)
+        if panel.runModal() == .OK, let folder = panel.url {
+            model.settings.screenRecordingFolder = folder.path
         }
     }
 }

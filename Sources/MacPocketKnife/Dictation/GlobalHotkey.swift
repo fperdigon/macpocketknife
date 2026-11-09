@@ -17,40 +17,55 @@ import Foundation
 
 @MainActor
 final class GlobalHotkey {
-    private var hotkey: EventHotKeyRef?
+    private var hotkeys: [UInt32: EventHotKeyRef] = [:]
+    private var keys: [UInt32: String] = [:]
     private var handler: EventHandlerRef?
-    var action: (@MainActor () -> Void)?
+    var actions: [UInt32: @MainActor () -> Void] = [:]
 
     init() {
         var event = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-        InstallEventHandler(GetApplicationEventTarget(), { _, _, context in
+        InstallEventHandler(GetApplicationEventTarget(), { _, event, context in
+            var identifier = EventHotKeyID()
+            guard let event else { return OSStatus(eventNotHandledErr) }
+            let result = GetEventParameter(event, EventParamName(kEventParamDirectObject),
+                                           EventParamType(typeEventHotKeyID), nil,
+                                           MemoryLayout<EventHotKeyID>.size, nil, &identifier)
+            guard result == noErr, identifier.signature == 0x4D504B44 else { return OSStatus(eventNotHandledErr) }
+            let id = identifier.id
             guard let context else { return OSStatus(eventNotHandledErr) }
             MainActor.assumeIsolated {
-                Unmanaged<GlobalHotkey>.fromOpaque(context).takeUnretainedValue().action?()
+                Unmanaged<GlobalHotkey>.fromOpaque(context).takeUnretainedValue().actions[id]?()
             }
             return noErr
         }, 1, &event, Unmanaged.passUnretained(self).toOpaque(), &handler)
     }
 
-    func register(enabled: Bool, key: String) -> Bool {
-        unregister()
+    func register(id: UInt32, enabled: Bool, key: String) -> Bool {
+        if let previous = hotkeys.removeValue(forKey: id) { UnregisterEventHotKey(previous) }
+        keys.removeValue(forKey: id)
         guard enabled else { return true }
-        guard handler != nil, let code = Self.keyCodes[key] else { return false }
-        let identifier = EventHotKeyID(signature: 0x4D504B44, id: 1)
+        guard handler != nil, let code = Self.keyCodes[key], !keys.values.contains(key) else { return false }
+        let identifier = EventHotKeyID(signature: 0x4D504B44, id: id)
         let modifiers = UInt32(controlKey | optionKey | cmdKey)
-        return RegisterEventHotKey(code, modifiers, identifier, GetApplicationEventTarget(), 0, &hotkey) == noErr
+        var hotkey: EventHotKeyRef?
+        let result = RegisterEventHotKey(code, modifiers, identifier, GetApplicationEventTarget(), 0, &hotkey)
+        guard result == noErr, let hotkey else { return false }
+        hotkeys[id] = hotkey
+        keys[id] = key
+        return true
     }
 
     func unregister() {
-        if let hotkey { UnregisterEventHotKey(hotkey) }
-        hotkey = nil
+        for hotkey in hotkeys.values { UnregisterEventHotKey(hotkey) }
+        hotkeys.removeAll()
+        keys.removeAll()
     }
 
     func shutdown() {
         unregister()
         if let handler { RemoveEventHandler(handler) }
         handler = nil
-        action = nil
+        actions.removeAll()
     }
 
     // Carbon virtual key codes refer to physical ANSI letter keys.

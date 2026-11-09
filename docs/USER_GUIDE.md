@@ -61,7 +61,7 @@ the clipboard unchanged and shows “No speech detected”. Recording stops and 
 automatically after ten minutes. Audio or recognition errors discard the session.
 Toggling again while permission requests are pending cancels startup.
 
-In **Settings > General > Dictation**, enable or disable the global shortcut and
+In **Settings > Tools > Dictation**, enable or disable the global shortcut and
 choose its letter (A–Z). Control, Option and Command are fixed modifiers. A shortcut
 conflict is shown in settings and a local notice; choose another letter. Shortcuts
 use the physical ANSI letter-key positions and require no Accessibility permission.
@@ -85,6 +85,47 @@ memory only during the session. Only the final text goes to the general clipboar
 notifications contain only a word count. Clipboard managers and Universal Clipboard
 may retain or sync that text outside the app. Replace or clear your clipboard when
 finished if the text is sensitive.
+
+## Screen recording
+
+Choose **Record screen** below **Dictate**, or press **Control-Option-Command-R**,
+to record the main display and system audio: videos, calls, and other apps' sound.
+The app's own audio is excluded. A red **⏺ mm:ss** indicator shows elapsed time;
+it appears alongside the Dictation dot when both tools are active. Choose
+**Stop recording** or press the shortcut again to finalize the file. A local
+**Screen recording saved** notification includes the file name and folder path.
+
+Files go to **~/Movies/MacPocketKnife** by default. The folder is created when
+needed. Names use local time: **Screen yyyy-MM-dd HH.mm.ss.mp4**, with a numbered
+suffix when necessary to avoid overwriting recordings. **Show recordings in
+Finder** opens the folder. Edit or trim recordings with **QuickTime Player**.
+
+In **Settings > Tools > Screen recording**, enable or disable the global shortcut,
+choose its A–Z key, select 30 or 60 fps, show or hide the cursor, and choose or
+reset the save folder. Control, Option and Command are fixed modifiers. Choose a
+key different from Dictation's key; duplicate shortcuts are refused and explained
+in settings. Carbon shortcuts use physical ANSI key positions and need no
+Accessibility access. **Include microphone** defaults to off and is available
+only on macOS 15 or later; it adds a second AAC audio track in the same file.
+Player support for simultaneous playback of multiple audio tracks varies.
+
+On first use, approve the macOS **Screen Recording** prompt. In **System Settings >
+Privacy & Security > Screen & System Audio Recording**, enable MacPocketKnife
+(the pane may be called **Screen Recording** on older macOS versions). You may
+need to quit and relaunch the app after granting access, then start recording
+again. Permission guidance in the menu opens this pane. Microphone access is
+requested separately only if **Include microphone** is enabled.
+
+Capture uses native display pixels, H.264 video, and 48 kHz stereo AAC system
+audio. Only the main display is recorded; protected content may be blank or
+silent, and high resolutions or 60 fps can exceed the Mac's encoder capacity.
+Slow storage may cause dropped frames. At least 1 GB of free space is required
+to start; recording stops and finalizes if space becomes critically low or
+capture fails. Empty or unusable files are removed. Stopping sharing from macOS,
+disconnecting the display, or quitting the app also finalizes the recording.
+There is no duration limit. Recording does not keep the Mac awake: sleep,
+locking, and lid behavior still apply. All capture and encoding stay on the Mac;
+recording content is never logged or sent to Telegram.
 
 ## External sleep blockers
 

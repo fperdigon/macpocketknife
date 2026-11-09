@@ -49,6 +49,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var dictation = DictationController.make(
         speech: AppleSpeechTranscriber(), pasteboard: SystemPasteboard(), notices: localNotifier
     )
+    private lazy var screenRecording = ScreenRecordingController.make(
+        recorder: ScreenCaptureKitRecorder(), permission: ScreenRecordingPermission(),
+        disk: RecordingDiskSpace(), files: RecordingFiles(), notices: localNotifier
+    )
+    private var isTerminating = false
     private lazy var hotkey = GlobalHotkey()
     private var settingsSubscription: AnyCancellable?
     private var hotkeyPreferences: String?
@@ -59,6 +64,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let keepAwake = NSMenuItem(title: "Keep awake", action: nil, keyEquivalent: "")
     private let keepUnlocked = NSMenuItem(title: "Keep unlocked", action: nil, keyEquivalent: "")
     private let dictate = NSMenuItem(title: "Dictate", action: nil, keyEquivalent: "")
+    private let recordScreen = NSMenuItem(title: "Record screen", action: nil, keyEquivalent: "")
+    private let screenRecordingStatus = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let dictationStatus = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let authorization = NSMenuItem(title: "Notifications: checking…", action: nil, keyEquivalent: "")
 
@@ -99,6 +106,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         dictate.target = self
         dictate.action = #selector(toggleDictation)
         menu.addItem(dictate)
+        recordScreen.target = self
+        recordScreen.action = #selector(toggleScreenRecording)
+        menu.addItem(recordScreen)
+        let recordings = NSMenuItem(title: "Show recordings in Finder", action: #selector(showRecordings), keyEquivalent: "")
+        recordings.target = self
+        menu.addItem(recordings)
+        screenRecordingStatus.target = self
+        screenRecordingStatus.action = #selector(openScreenRecordingPrivacy)
+        screenRecordingStatus.isHidden = true
+        menu.addItem(screenRecordingStatus)
         dictationStatus.target = self
         dictationStatus.action = #selector(openDictationPrivacy)
         dictationStatus.isHidden = true
@@ -120,7 +137,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem = item
 
         dictation.onChange = { [weak self] in self?.refreshStatus() }
-        hotkey.action = { [weak self] in self?.toggleDictation() }
+        screenRecording.onChange = { [weak self] in self?.refreshStatus() }
+        hotkey.actions[1] = { [weak self] in self?.toggleDictation() }
+        hotkey.actions[2] = { [weak self] in self?.toggleScreenRecording() }
         settingsSubscription = settings.$settings.sink { [weak self] value in
             self?.configureHotkey(value)
         }
@@ -150,6 +169,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if isTerminating { return .terminateLater }
+        isTerminating = true
+        Task { @MainActor in
+            await screenRecording.stopAndWait()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         dictation.discard()
         hotkey.shutdown()
@@ -175,9 +204,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         dictate.title = label + shortcut
         dictate.state = active ? .on : .off
         dictate.toolTip = recording ? "\(dictation.wordCount) words transcribed" : "Transcribe speech on this Mac and copy it to the clipboard."
-        statusItem?.length = recording ? NSStatusItem.variableLength : NSStatusItem.squareLength
+        let screenActive = screenRecording.state == .recording
+        let screenBusy = screenActive || screenRecording.state == .starting || screenRecording.state == .stopping
+        let screenLabel = screenBusy ? "Stop recording" : "Record screen"
+        let screenKey = settings.settings.screenRecordingHotkeyKey
+        let screenShortcut = settings.settings.screenRecordingHotkeyEnabled ? " (⌃⌥⌘\(screenKey))" : ""
+        recordScreen.title = screenLabel + screenShortcut
+        recordScreen.state = screenBusy ? .on : .off
+        recordScreen.isEnabled = screenRecording.state != .stopping
+        let screenError = screenRecording.lastError ?? settings.screenRecordingHotkeyError
+        screenRecordingStatus.title = screenError ?? ""
+        screenRecordingStatus.isHidden = screenError == nil
+        var indicators = recording ? " ●" : ""
+        if screenActive { indicators += " ⏺ " + screenRecording.elapsedTitle }
+        statusItem?.length = (recording || screenActive) ? NSStatusItem.variableLength : NSStatusItem.squareLength
         statusItem?.button?.attributedTitle = NSAttributedString(
-            string: recording ? " ●" : "", attributes: [.foregroundColor: NSColor.systemRed]
+            string: indicators, attributes: [.foregroundColor: NSColor.systemRed]
         )
         statusItem?.button?.imagePosition = .imageLeading
         let error = dictation.lastError ?? settings.dictationHotkeyError
@@ -217,13 +259,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func configureHotkey(_ value: AppSettings) {
-        let signature = "\(value.dictationHotkeyEnabled)-\(value.dictationHotkeyKey)"
+        let dictationSignature = "\(value.dictationHotkeyEnabled)-\(value.dictationHotkeyKey)"
+        let screenSignature = "\(value.screenRecordingHotkeyEnabled)-\(value.screenRecordingHotkeyKey)"
+        let signature = dictationSignature + screenSignature
         guard signature != hotkeyPreferences else { return }
         hotkeyPreferences = signature
-        let registered = hotkey.register(enabled: value.dictationHotkeyEnabled, key: value.dictationHotkeyKey)
-        settings.dictationHotkeyError = registered ? nil : "Dictation shortcut is unavailable. Choose another key in Settings > General > Dictation."
+        hotkey.unregister()
+        let registered = hotkey.register(id: 1, enabled: value.dictationHotkeyEnabled, key: value.dictationHotkeyKey)
+        settings.dictationHotkeyError = registered ? nil : "Dictation shortcut is unavailable. Choose another key in Settings > Tools > Dictation."
         if let message = settings.dictationHotkeyError {
             Task { await localNotifier.deliver(Notice(kind: .info, title: "Dictation shortcut unavailable", body: message)) }
+        }
+        let screenRegistered: Bool
+        if value.screenRecordingHotkeyConflicts {
+            screenRegistered = false
+            settings.screenRecordingHotkeyError = "Choose a screen recording key different from the Dictation key."
+        } else {
+            screenRegistered = hotkey.register(id: 2, enabled: value.screenRecordingHotkeyEnabled, key: value.screenRecordingHotkeyKey)
+            settings.screenRecordingHotkeyError = screenRegistered ? nil : "Screen recording shortcut is unavailable. Choose another key in Settings > Tools."
+        }
+        if !screenRegistered, let message = settings.screenRecordingHotkeyError {
+            Task { await localNotifier.deliver(Notice(kind: .info, title: "Screen recording shortcut unavailable", body: message)) }
         }
         // Published settings arrive before the stored value changes.
         Task { @MainActor [weak self] in self?.refreshStatus() }
@@ -237,6 +293,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             locale = Locale.current
         }
         dictation.toggle(locale: locale)
+    }
+
+    @objc private func toggleScreenRecording() {
+        screenRecording.toggle(settings: settings.settings)
+    }
+
+    @objc private func showRecordings() {
+        screenRecording.showRecordings(folderPath: settings.settings.screenRecordingFolder)
+    }
+
+    @objc private func openScreenRecordingPrivacy() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     @objc private func openDictationPrivacy() {
