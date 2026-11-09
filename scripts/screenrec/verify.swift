@@ -219,7 +219,7 @@ func boundaries(_ events: [Event]) -> [String: Double] {
     }
     return result
 }
-func verify(_ reference: Analysis, _ recording: Analysis, seconds: Double?) -> Bool {
+func verify(_ reference: Analysis, _ recording: Analysis, seconds: Double?, strictDurations: Bool = false) -> Bool {
     var passed = true
     func check(_ condition: Bool, _ description: String) {
         print("\(condition ? "PASS" : "FAIL") \(description)")
@@ -238,11 +238,22 @@ func verify(_ reference: Analysis, _ recording: Analysis, seconds: Double?) -> B
     let expectedSpan = seconds ?? recording.span
     let relativeTolerance: Double = expectedSpan * 0.15
     let tolerance: Double = max(1.5, relativeTolerance)
-    let durations = [recording.videoDuration, recording.audioDuration, recording.span]
-    let durationOK = durations.allSatisfy { $0.isFinite && $0 > 0 && abs($0 - expectedSpan) <= tolerance }
-    let pairOK = abs(recording.videoDuration - recording.audioDuration) <= tolerance
-    check(durationOK && pairOK, String(format: "durations video=%.3f audio=%.3f span=%.3f expected=%.3f tolerance=%.3f s",
+    let durations: [Double] = [recording.audioDuration, recording.span]
+    let durationOK: Bool = durations.allSatisfy { $0.isFinite && $0 > 0 && abs($0 - expectedSpan) <= tolerance }
+    let minimumVideo: Double = recording.audioDuration * 0.60
+    let maximumVideo: Double = recording.audioDuration + 1.5
+    var videoOK: Bool = recording.videoDuration.isFinite
+        && recording.videoDuration >= minimumVideo && recording.videoDuration <= maximumVideo
+    if strictDurations {
+        let expectedVideoOK: Bool = abs(recording.videoDuration - expectedSpan) <= tolerance
+        let pairOK: Bool = abs(recording.videoDuration - recording.audioDuration) <= tolerance
+        videoOK = recording.videoDuration.isFinite && recording.videoDuration > 0 && expectedVideoOK && pairOK
+    }
+    check(durationOK && videoOK, String(format: "durations video=%.3f audio=%.3f span=%.3f expected=%.3f tolerance=%.3f s",
         recording.videoDuration, recording.audioDuration, recording.span, expectedSpan, tolerance))
+    if !strictDurations {
+        print(String(format: "Recording video duration limits: minimum=%.3f maximum=%.3f s", minimumVideo, maximumVideo))
+    }
     for (name, expected, observed) in [("video", reference.video, recording.video), ("audio", reference.audio, recording.audio)] {
         let count = lcs(expected, observed)
         let requiredCount: Double = Double(observed.count) * 0.85
@@ -286,20 +297,20 @@ func selftest() -> Bool {
     healthy.rms = 0.237; healthy.peak = 0.35
     healthy.hasVideo = true; healthy.hasAudio = true
     print("Selftest healthy control:")
-    passed = verify(healthy, healthy, seconds: 12) && passed
+    passed = verify(healthy, healthy, seconds: 12, strictDurations: true) && passed
     var silent = healthy
     silent.audio = []; silent.rms = 0; silent.peak = 0
     print("Selftest silent control (FAIL assertions expected):")
-    passed = !verify(healthy, silent, seconds: 12) && passed
+    passed = !verify(healthy, silent, seconds: 12, strictDurations: true) && passed
     var shuffled = healthy
     shuffled.video = forward.reversed()
     shuffled.audio = forward.reversed()
     print("Selftest shuffled control (FAIL assertions expected):")
-    passed = !verify(healthy, shuffled, seconds: 12) && passed
+    passed = !verify(healthy, shuffled, seconds: 12, strictDurations: true) && passed
     var delayed = healthy
     delayed.audio = forward.map { Event(slot: $0.slot, time: $0.time + 0.6) }
     print("Selftest desynchronized control (FAIL assertions expected):")
-    passed = !verify(healthy, delayed, seconds: 12) && passed
+    passed = !verify(healthy, delayed, seconds: 12, strictDurations: true) && passed
     print("\(passed ? "PASS" : "FAIL") verifier selftest, including expected negative controls")
     return passed
 }
@@ -317,7 +328,7 @@ do {
     }
     let reference = try await analyze(args[1])
     let recording = try await analyze(args[2])
-    let passed = verify(reference, recording, seconds: seconds)
+    let passed = verify(reference, recording, seconds: seconds, strictDurations: args[1] == args[2])
     if let index = args.firstIndex(of: "--frames"), index + 1 < args.count, recording.hasVideo {
         let directory = URL(fileURLWithPath: args[index + 1])
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

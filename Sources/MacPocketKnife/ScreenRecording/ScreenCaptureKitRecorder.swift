@@ -64,6 +64,8 @@ private final class RecordingOutput: NSObject, SCStreamOutput, SCStreamDelegate,
     private let workingFile: URL
     private let failure: @Sendable (ScreenRecordingFailure?) -> Void
     private var firstVideoTime: CMTime?
+    private var lastVideoTime: CMTime?
+    private var latestTime: CMTime?
     private var wroteVideo = false
     private var closing = false
     private var reportedFailure = false
@@ -126,7 +128,21 @@ private final class RecordingOutput: NSObject, SCStreamOutput, SCStreamDelegate,
         }
         guard input.isReadyForMoreMediaData else { return }
         if input.append(sampleBuffer) {
-            if type == .screen { wroteVideo = true }
+            if type == .screen {
+                wroteVideo = true
+                lastVideoTime = time
+            }
+            var sampleEnd: CMTime = time
+            let duration: CMTime = sampleBuffer.duration
+            if duration.isNumeric {
+                let end: CMTime = CMTimeAdd(time, duration)
+                if CMTimeCompare(end, sampleEnd) > 0 { sampleEnd = end }
+            }
+            if let latestTime {
+                if CMTimeCompare(sampleEnd, latestTime) > 0 { self.latestTime = sampleEnd }
+            } else {
+                latestTime = sampleEnd
+            }
         } else { reportWriterFailure() }
         if writer.status == .failed { reportWriterFailure() }
     }
@@ -154,6 +170,11 @@ private final class RecordingOutput: NSObject, SCStreamOutput, SCStreamDelegate,
                     writer.startSession(atSourceTime: .zero)
                 }
                 if writer.status == .writing {
+                    if firstVideoTime != nil, wroteVideo, let latestTime, let lastVideoTime,
+                       CMTimeCompare(latestTime, lastVideoTime) > 0 {
+                        // ScreenCaptureKit stops sending frames while the screen is static.
+                        writer.endSession(atSourceTime: latestTime)
+                    }
                     video.markAsFinished()
                     audio.markAsFinished()
                     microphone?.markAsFinished()
