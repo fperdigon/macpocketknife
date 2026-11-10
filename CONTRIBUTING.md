@@ -68,8 +68,11 @@ build. After code changes, run
 re-add `build/ScreenRecTest.app`, and allow the one-time macOS consent dialog before
 rerunning the test; otherwise the dialog covers the screen and fails the colour
 check. The test never grants
-permission or changes audio devices locally. `--mic` is available only on the
-hidden recorder CLI; the end-to-end test checks system audio without a microphone.
+permission or changes audio devices locally. Run `scripts/run-screenrec-test.sh --mic` locally on macOS 15+ to include the
+microphone and require exactly one mixed audio track while retaining the system
+tone ordering and A/V sync checks. This mode requires microphone permission and
+fails if capture falls back without it. It cannot be combined with CI mode.
+The default end-to-end test checks system audio without a microphone.
 
 The test generates a deterministic 12-second H.264/AAC clip with twelve unique
 colour/tone pairs and short silent gaps. A synthetic clip is deliberately preferred

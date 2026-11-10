@@ -19,6 +19,7 @@ import Testing
 @MainActor
 private final class FakeScreenRecorder: ScreenRecording {
     var onFailure: (@MainActor (ScreenRecordingFailure?) -> Void)?
+    var microphoneOutcome: RecordingMicrophoneOutcome = .included
     var startFailure: ScreenRecordingFailure?
     var stopFailure: ScreenRecordingFailure?
     var starts = 0
@@ -33,7 +34,7 @@ private final class FakeScreenRecorder: ScreenRecording {
     var display: DisplayInfo?
     var content: (any ScreenRecordingContent)?
     func start(configuration: ScreenRecordingConfiguration, destination: URL, display: DisplayInfo?,
-               content: (any ScreenRecordingContent)?) async throws {
+               content: (any ScreenRecordingContent)?) async throws -> RecordingMicrophoneOutcome {
         self.display = display
         self.content = content
         starts += 1
@@ -41,6 +42,7 @@ private final class FakeScreenRecorder: ScreenRecording {
         self.destination = destination
         if holdStart { await withCheckedContinuation { startContinuation = $0 } }
         if let startFailure { throw startFailure }
+        return microphoneOutcome
     }
     func stop() async throws -> URL? {
         stops += 1
@@ -141,7 +143,7 @@ struct ScreenRecordingTests {
         await f.start()
         #expect(f.controller.state == .recording)
         #expect(f.recorder.starts == 1)
-        #expect(f.recorder.configuration == ScreenRecordingConfiguration(frameRate: 30, showsCursor: true, includesMicrophone: false))
+        #expect(f.recorder.configuration == ScreenRecordingConfiguration(frameRate: 30, showsCursor: true, includesMicrophone: true))
         #expect(f.recorder.destination?.lastPathComponent.hasSuffix(" 3.mp4") == true)
         #expect(f.scheduler.pendingCount == 1)
         f.scheduler.advance(by: 1)
@@ -353,7 +355,7 @@ struct ScreenRecordingTests {
         #expect(settings.screenRecordingHotkeyKey == "R")
         #expect(settings.screenRecordingFrameRate == 30)
         #expect(settings.screenRecordingShowsCursor)
-        #expect(!settings.screenRecordingIncludesMicrophone)
+        #expect(settings.screenRecordingIncludesMicrophone)
         #expect(settings.screenRecordingFolder == ScreenRecordingFiles.defaultFolder)
         var invalid = settings
         invalid.screenRecordingHotkeyKey = " rr "
@@ -579,4 +581,64 @@ struct ScreenRecordingTests {
         #expect(f.controller.state == .idle)
     }
 
+}
+
+@MainActor
+struct RecordingMicrophoneTests {
+    @Test(arguments: [RecordingMicrophoneOutcome.denied, .unsupported, .unavailable, .included, .disabled])
+    func fallbackIsNonfatalAndIncludedInSavedNotice(_ outcome: RecordingMicrophoneOutcome) async {
+        let f = ScreenFixture()
+        f.recorder.microphoneOutcome = outcome
+        await f.start()
+        #expect(f.controller.state == .recording)
+        #expect(f.controller.lastError == nil)
+        #expect(f.controller.lastNotice == outcome.notice)
+        _ = await f.controller.stopAndWait()
+        #expect(f.controller.lastSavedFile != nil)
+        if let notice = outcome.notice {
+            #expect(f.dependencies.notices.last?.body.contains(notice) == true)
+        }
+        await f.start()
+        #expect(f.controller.lastNotice == (outcome == .unsupported ? nil : outcome.notice))
+        _ = await f.controller.stopAndWait()
+    }
+
+    @Test func fallbackPreservesDisplayNoticeAndDeduplicatesAcrossDisplays() async {
+        let f = ScreenFixture()
+        f.recorder.microphoneOutcome = .denied
+        var settings = AppSettings()
+        settings.screenRecordingTarget = .display(uuid: ScreenEnvironment.other.uuid)
+        f.controller.toggle(settings: settings)
+        await f.settle()
+        #expect(f.controller.lastNotice?.contains("not connected") == true)
+        #expect(f.controller.lastNotice?.contains("without your microphone") == true)
+        _ = await f.controller.stopAndWait()
+        f.environment.displays = [ScreenEnvironment.main, ScreenEnvironment.other]
+        let other = FakeScreenRecorder()
+        other.microphoneOutcome = .denied
+        f.environment.recorders.append(other)
+        settings.screenRecordingTarget = .allDisplays
+        f.controller.toggle(settings: settings)
+        await f.settle()
+        #expect(f.controller.lastNotice == RecordingMicrophoneOutcome.denied.notice)
+        _ = await f.controller.stopAndWait()
+    }
+
+    @Test func explicitSavedMicrophonePreferencesSurviveDecoding() throws {
+        #expect(AppSettings().screenRecordingIncludesMicrophone)
+        for enabled in [true, false] {
+            var settings = AppSettings()
+            settings.screenRecordingIncludesMicrophone = enabled
+            let decoded = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(settings))
+            #expect(decoded.screenRecordingIncludesMicrophone == enabled)
+        }
+    }
+
+    @Test func microphoneNoticeGuidanceAndComposition() {
+        #expect(RecordingMicrophoneOutcome.denied.notice?.contains("Privacy & Security > Microphone") == true)
+        #expect(RecordingMicrophoneOutcome.unsupported.notice?.contains("macOS 15") == true)
+        #expect(RecordingMicrophoneOutcome.unavailable.notice?.contains("input device") == true)
+        let notice = NoticeComposer().composeScreenRecording(savedFiles: [], notice: "Microphone unavailable.")
+        #expect(notice.body == "No usable video was saved.\nMicrophone unavailable.")
+    }
 }

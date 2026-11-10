@@ -122,9 +122,16 @@ choose its A–Z key, select 30 or 60 fps, show or hide the cursor, and choose o
 reset the save folder. Control, Option and Command are fixed modifiers. Choose a
 key different from Dictation's key; duplicate shortcuts are refused and explained
 in settings. Carbon shortcuts use physical ANSI key positions and need no
-Accessibility access. **Include microphone** defaults to off and is available
-only on macOS 15 or later; it adds a second AAC audio track in the same file.
-Player support for simultaneous playback of multiple audio tracks varies.
+Accessibility access. **Include microphone (mixed into the same audio track)** defaults to on.
+On macOS 15+, your microphone and system audio are mixed into one 48 kHz stereo
+AAC track so players hear both. Turn it off with **Record with microphone** directly
+below **Record screen**, or in **Settings > Tools > Screen recording**. The menu
+checkmark cannot be changed during recording. If microphone access is denied or
+the device cannot start, video and system audio still record; the menu status and
+saved notification explain the fallback. Allow access in **System Settings >
+Privacy & Security > Microphone** to include your voice. On older macOS versions,
+recording continues without the microphone and shows the macOS 15 requirement
+once per app session.
 
 On first use, approve the macOS **Screen Recording** prompt. In **System Settings >
 Privacy & Security > Screen & System Audio Recording**, enable MacPocketKnife

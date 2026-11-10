@@ -48,7 +48,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var screenRecordingHotkeyKey = "R"
     public var screenRecordingFrameRate = 30
     public var screenRecordingShowsCursor = true
-    public var screenRecordingIncludesMicrophone = false
+    public var screenRecordingIncludesMicrophone = true
     public var screenRecordingTarget: ScreenRecordingTarget = .mainDisplay
     public var screenRecordingDisplayName: String?
     public var screenRecordingFolder = ScreenRecordingFiles.defaultFolder
@@ -105,7 +105,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         screenRecordingHotkeyKey = try container.decodeIfPresent(String.self, forKey: .screenRecordingHotkeyKey) ?? "R"
         screenRecordingFrameRate = try container.decodeIfPresent(Int.self, forKey: .screenRecordingFrameRate) ?? 30
         screenRecordingShowsCursor = try container.decodeIfPresent(Bool.self, forKey: .screenRecordingShowsCursor) ?? true
-        screenRecordingIncludesMicrophone = try container.decodeIfPresent(Bool.self, forKey: .screenRecordingIncludesMicrophone) ?? false
+        screenRecordingIncludesMicrophone = try container.decodeIfPresent(Bool.self, forKey: .screenRecordingIncludesMicrophone) ?? true
         screenRecordingTarget = try container.decodeIfPresent(ScreenRecordingTarget.self, forKey: .screenRecordingTarget) ?? .mainDisplay
         screenRecordingDisplayName = try container.decodeIfPresent(String.self, forKey: .screenRecordingDisplayName)
         screenRecordingFolder = try container.decodeIfPresent(String.self, forKey: .screenRecordingFolder) ?? ScreenRecordingFiles.defaultFolder

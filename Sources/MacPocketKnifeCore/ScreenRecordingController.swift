@@ -59,6 +59,7 @@ public final class ScreenRecordingController {
     private var startedAt: Date?
     private var folder: URL?
     private var stopRequested = false
+    private var reportedUnsupportedMicrophone = false
     private var pendingFailure: ScreenRecordingFailure?
 
     public var elapsedTitle: String {
@@ -202,8 +203,14 @@ public final class ScreenRecordingController {
                     reserved.insert(destination.lastPathComponent.precomposedStringWithCanonicalMapping.lowercased())
                     let task: Task<Void, Error> = Task {
                         do {
-                            try await session.recorder.start(configuration: configuration,
+                            let microphone = try await session.recorder.start(configuration: configuration,
                                 destination: destination, display: display, content: selectedContent)
+                            if microphone != .unsupported || !reportedUnsupportedMicrophone {
+                                if let notice = microphone.notice, lastNotice?.contains(notice) != true {
+                                    lastNotice = [lastNotice, notice].compactMap { $0 }.joined(separator: " ")
+                                }
+                                if microphone == .unsupported { reportedUnsupportedMicrophone = true }
+                            }
                             session.didStart = true
                             if stopRequested { _ = session.stop() }
                         } catch {
@@ -291,7 +298,7 @@ public final class ScreenRecordingController {
         }
         if !lastSavedFiles.isEmpty || !interruptedDisplays.isEmpty {
             let notice = NoticeComposer().composeScreenRecording(savedFiles: lastSavedFiles,
-                                                                interruptedDisplays: interruptedDisplays)
+                                                                interruptedDisplays: interruptedDisplays, notice: lastNotice)
             await notices.deliver(notice)
         }
         sessions = []
