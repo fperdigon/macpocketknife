@@ -55,6 +55,23 @@ struct PCMMixerTests {
         #expect(mixer.drain(upTo: 1) == [1, 1])
     }
 
+    @Test func countsOnlyDiscardedFramesAndKeepsOverlappingSuffix() {
+        var mixer = PCMMixer()
+        #expect(mixer.add([], at: -20) == 0)
+        #expect(mixer.droppedFrameCount == 0)
+        #expect(mixer.add([0.9, 0.8, 0.1, 0.2], at: -1) == 1)
+        #expect(mixer.droppedFrameCount == 1)
+        #expect(mixer.drain(upTo: 1) == [0.1, 0.2])
+        #expect(mixer.add([1, 1], at: -5) == 0)
+        #expect(mixer.droppedFrameCount == 2)
+        #expect(mixer.add([1, 1, 0.3, 0.4, 0.5, 0.6], at: 0) == 2)
+        #expect(mixer.droppedFrameCount == 3)
+        #expect(mixer.drain(upTo: 3) == [0.3, 0.4, 0.5, 0.6])
+        #expect(mixer.add([0.7, 0.8], at: 3) == 1)
+        #expect(mixer.droppedFrameCount == 3)
+        #expect(mixer.drain(upTo: 4) == [0.7, 0.8])
+    }
+
     @Test func absentSourceAndTwoHourTimelineHaveBoundedStorage() {
         var mixer = PCMMixer()
         let samples = [Float](repeating: 0.25, count: 2048)

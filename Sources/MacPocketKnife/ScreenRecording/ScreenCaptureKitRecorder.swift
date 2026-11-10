@@ -59,6 +59,10 @@ private final class RecordingOutput: NSObject, SCStreamOutput, SCStreamDelegate,
     private let writer: AVAssetWriter
     private let video: AVAssetWriterInput
     private let audio: AVAssetWriterInput
+    private let diagnosticsEnabled: Bool
+    private var diagnostics = [RecordingAudioDiagnostics(), RecordingAudioDiagnostics()]
+    private var microphoneOutcome: RecordingMicrophoneOutcome = .disabled
+    private var captureMicrophoneSet = false
     private var mixesMicrophone: Bool
     private var mixer: PCMMixer
     private let converter: RecordingPCMConverter
@@ -74,8 +78,9 @@ private final class RecordingOutput: NSObject, SCStreamOutput, SCStreamDelegate,
     private var activeStreamID: ObjectIdentifier?
     private var stoppedStreams: Set<ObjectIdentifier> = []
 
-    init(destination: URL, width: Int, height: Int, frameRate: Int, microphone: Bool,
+    init(destination: URL, width: Int, height: Int, frameRate: Int, microphone: Bool, diagnosticsEnabled: Bool,
          failure: @escaping @Sendable (ScreenRecordingFailure?) -> Void) throws {
+        self.diagnosticsEnabled = diagnosticsEnabled
         self.destination = destination
         self.failure = failure
         workingFile = destination.deletingLastPathComponent().appendingPathComponent(".Recording-\(UUID().uuidString).mp4")
@@ -112,7 +117,12 @@ private final class RecordingOutput: NSObject, SCStreamOutput, SCStreamDelegate,
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        guard !closing, sampleBuffer.isValid else { return }
+        guard !closing else { return }
+        var source: Int?
+        if type == .audio { source = 0 }
+        if #available(macOS 15.0, *), type == .microphone { source = 1 }
+        if diagnosticsEnabled, let source { diagnostics[source].receive(sampleBuffer) }
+        guard sampleBuffer.isValid else { return }
         guard writer.status == .writing else { reportWriterFailure(); return }
         let time = sampleBuffer.presentationTimeStamp
         guard time.isNumeric else { return }
@@ -128,21 +138,29 @@ private final class RecordingOutput: NSObject, SCStreamOutput, SCStreamDelegate,
                 writer.startSession(atSourceTime: time)
             }
         } else {
-            guard let firstVideoTime, CMTimeCompare(time, firstVideoTime) >= 0 else { return }
-            var source = 0
-            if type == .audio { source = 0 }
-            else if #available(macOS 15.0, *), type == .microphone { source = 1 }
-            else { return }
+            guard let source else { return }
+            // Observe conversion before timeline guards, including startup buffers.
+            let samples = mixesMicrophone || diagnosticsEnabled
+                ? converter.samples(sampleBuffer, source: source) : nil
+            if diagnosticsEnabled { diagnostics[source].conversion(samples) }
+            guard let firstVideoTime else { return }
             if mixesMicrophone {
-                if let samples = converter.samples(sampleBuffer, source: source) {
+                if let samples {
                     let seconds = CMTimeSubtract(time, firstVideoTime).seconds
                     let frame = Int((seconds * 48_000).rounded())
-                    mixer.add(samples, at: frame)
-                    drainAudio(upTo: mixer.endPosition - 12_000)
+                    let droppedBefore = mixer.droppedFrameCount
+                    let added = mixer.add(samples, at: frame)
+                    if diagnosticsEnabled {
+                        diagnostics[source].addedFrames += added
+                        diagnostics[source].droppedFrames += mixer.droppedFrameCount - droppedBefore
+                    }
+                    // Keep one second for sources delivered later than system audio.
+                    // Already written audio cannot be shifted without breaking A/V sync.
+                    drainAudio(upTo: mixer.endPosition - 48_000)
                 }
                 return
             }
-            guard source == 0 else { return }
+            guard source == 0, CMTimeCompare(time, firstVideoTime) >= 0 else { return }
             input = audio
         }
         guard input.isReadyForMoreMediaData else { return }
@@ -178,6 +196,25 @@ private final class RecordingOutput: NSObject, SCStreamOutput, SCStreamDelegate,
                 }
             }
         }
+    }
+
+    func setMicrophoneDiagnostics(outcome: RecordingMicrophoneOutcome, captureMicrophone: Bool) async {
+        await withCheckedContinuation { continuation in
+            queue.async { [self] in
+                microphoneOutcome = outcome
+                captureMicrophoneSet = captureMicrophone
+                continuation.resume()
+            }
+        }
+    }
+
+    private func printDiagnostics() {
+        guard diagnosticsEnabled else { return }
+        var block = "MIC-DEBUG BEGIN outcome=\(microphoneOutcome) config.captureMicrophone=\(captureMicrophoneSet) drainMarginSeconds=1\n"
+        block += diagnostics[1].report(name: "microphone", firstVideoTime: firstVideoTime)
+        block += diagnostics[0].report(name: "system", firstVideoTime: firstVideoTime)
+        block += "MIC-DEBUG mixerDroppedBehindPosition=\(mixer.droppedFrameCount)\nMIC-DEBUG END\n"
+        FileHandle.standardError.write(Data(block.utf8))
     }
 
     func disableMicrophone() async {
@@ -229,6 +266,7 @@ private final class RecordingOutput: NSObject, SCStreamOutput, SCStreamDelegate,
         try await withCheckedThrowingContinuation { continuation in
             queue.async { [self] in
                 closing = true
+                printDiagnostics()
                 finishWhenReady(continuation)
             }
         }
@@ -343,7 +381,8 @@ final class ScreenCaptureKitRecorder: ScreenRecording {
         generation += 1
         let session = generation
         let output = try RecordingOutput(destination: destination, width: width, height: height,
-                                         frameRate: configuration.frameRate, microphone: microphone) { [weak self] failure in
+                                         frameRate: configuration.frameRate, microphone: microphone,
+                                         diagnosticsEnabled: RecordingSelfTest.microphoneDiagnosticsEnabled) { [weak self] failure in
             Task { @MainActor [weak self] in
                 guard let self, self.generation == session else { return }
                 self.onFailure?(failure)
@@ -361,6 +400,11 @@ final class ScreenCaptureKitRecorder: ScreenRecording {
             await output.disableMicrophone()
             try await startStream(filter: filter, configuration: config, output: output, microphone: false)
             outcome = .unavailable
+        }
+        if RecordingSelfTest.microphoneDiagnosticsEnabled {
+            var captureMicrophone = false
+            if #available(macOS 15.0, *) { captureMicrophone = config.captureMicrophone }
+            await output.setMicrophoneDiagnostics(outcome: outcome, captureMicrophone: captureMicrophone)
         }
         return outcome
     }
