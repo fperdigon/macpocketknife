@@ -94,10 +94,13 @@ and a **Main** label. In **One screen** mode, click a card: an accent border and
 checkmark identify the selected screen, and the others are dimmed. In **All screens
 (separate videos)** mode, every card is highlighted and labeled **Video 1**,
 **Video 2**, and so on. This mode is hidden when only one display is connected.
-Scroll horizontally to see more screens. Previews refresh when the window opens
-or connected displays change; press **Refresh** for an updated snapshot. Previews
-need Screen Recording permission; opening the window never requests it. Without
-permission, placeholders appear until permission is requested when you press Start.
+Scroll horizontally to see more screens. Previews refresh about every second while
+the window is visible and stay in memory only; they are never saved or sent.
+They need the same Screen Recording permission as recording, and opening the
+window may prompt for it. If previews fail, polling stops and placeholders remain.
+Click **Allow screen preview** to request access and open **System Settings >
+Privacy & Security > Screen Recording**. Previews retry when you return to the
+window or after a few seconds. macOS may ask again after an app update.
 Set **Include microphone**,
 **Show cursor**, and **Frame rate** (30 or 60 fps), then press **Start recording**.
 All-screens mode creates one video per screen. On macOS 14+, **Choose with system
