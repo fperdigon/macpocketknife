@@ -49,6 +49,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var screenRecordingFrameRate = 30
     public var screenRecordingShowsCursor = true
     public var screenRecordingIncludesMicrophone = false
+    public var screenRecordingTarget: ScreenRecordingTarget = .mainDisplay
+    public var screenRecordingDisplayName: String?
     public var screenRecordingFolder = ScreenRecordingFiles.defaultFolder
     public var skippedVersion: String?
 
@@ -77,6 +79,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
+        case screenRecordingTarget, screenRecordingDisplayName
         case screenRecordingHotkeyEnabled, screenRecordingHotkeyKey, screenRecordingFrameRate
         case screenRecordingShowsCursor, screenRecordingIncludesMicrophone, screenRecordingFolder
         case dictationHotkeyEnabled, dictationHotkeyKey, dictationLanguage
@@ -103,6 +106,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
         screenRecordingFrameRate = try container.decodeIfPresent(Int.self, forKey: .screenRecordingFrameRate) ?? 30
         screenRecordingShowsCursor = try container.decodeIfPresent(Bool.self, forKey: .screenRecordingShowsCursor) ?? true
         screenRecordingIncludesMicrophone = try container.decodeIfPresent(Bool.self, forKey: .screenRecordingIncludesMicrophone) ?? false
+        screenRecordingTarget = try container.decodeIfPresent(ScreenRecordingTarget.self, forKey: .screenRecordingTarget) ?? .mainDisplay
+        screenRecordingDisplayName = try container.decodeIfPresent(String.self, forKey: .screenRecordingDisplayName)
         screenRecordingFolder = try container.decodeIfPresent(String.self, forKey: .screenRecordingFolder) ?? ScreenRecordingFiles.defaultFolder
         skippedVersion = try container.decodeIfPresent(String.self, forKey: .skippedVersion)
     }
@@ -133,6 +138,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         result.dictationHotkeyKey = Self.dictationKeys.contains(key) ? key : "T"
         let screenKey = screenRecordingHotkeyKey.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         result.screenRecordingHotkeyKey = Self.dictationKeys.contains(screenKey) ? screenKey : "R"
+        result.screenRecordingTarget = screenRecordingTarget.validated()
         result.screenRecordingFrameRate = screenRecordingFrameRate == 60 ? 60 : 30
         let folder = screenRecordingFolder.trimmingCharacters(in: .whitespacesAndNewlines)
         result.screenRecordingFolder = folder.isEmpty ? ScreenRecordingFiles.defaultFolder : NSString(string: folder).expandingTildeInPath

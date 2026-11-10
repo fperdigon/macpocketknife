@@ -28,12 +28,16 @@ Only dictation preferences (shortcut and language) are stored in UserDefaults.
 
 ## Screen recording
 
-Screen recording uses Apple's ScreenCaptureKit and AVAssetWriter to save the main
-display and system audio locally as H.264/AAC MP4 files. The app's own audio is
+Screen recording uses Apple's ScreenCaptureKit and AVAssetWriter to save selected
+displays and system audio locally as H.264/AAC MP4 files. The app's own audio is
 excluded. Microphone capture is optional, off by default, and available only on
 macOS 15 or later as a second audio track. Screen Recording permission is required;
 microphone permission is requested only when that option is enabled. Access can
 be revoked in System Settings > Privacy & Security.
+
+The macOS 14+ system picker and its live display thumbnails stay on this Mac.
+Neither picker selections nor thumbnails are uploaded. Display UUIDs and the last
+selected display name are stored locally with preferences.
 
 No recording content leaves the Mac through this feature. There is no telemetry,
 content logging, upload, or Telegram delivery. Saved notices are local only and

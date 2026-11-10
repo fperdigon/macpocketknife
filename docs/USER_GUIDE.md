@@ -89,15 +89,32 @@ finished if the text is sensitive.
 ## Screen recording
 
 Choose **Record screen** below **Dictate**, or press **Control-Option-Command-R**,
-to record the main display and system audio: videos, calls, and other apps' sound.
+to record your selected display and system audio: videos, calls, and other apps' sound.
 The app's own audio is excluded. A red **⏺ mm:ss** indicator shows elapsed time;
 it appears alongside the Dictation dot when both tools are active. Choose
 **Stop recording** or press the shortcut again to finalize the file. A local
 **Screen recording saved** notification includes the file name and folder path.
 
+With two or more connected displays, **Record screen** opens a submenu listing
+names and pixel resolutions. The main display is labelled and the saved default
+has a checkmark. Choose a display or **All screens (separate videos)** for this
+recording. On macOS 14+, **Choose with preview…** opens the system picker with
+live display thumbnails; cancelling starts nothing.
+
+Set the shortcut's default in **Settings > Tools > Screen recording > Screen to
+record**: **Main display**, a connected display, **All screens (separate videos)**,
+or **Ask each time** (macOS 14+). Ask each time opens the preview picker. Displays
+are remembered by stable UUID. If a saved display is disconnected, the main
+display is used and the menu explains the fallback; reconnecting restores the
+saved choice. On macOS 13, a previously saved Ask each time choice uses the main
+display. If one screen stops sharing or is unplugged, the other recordings
+continue; the final notification mentions the interrupted display.
+
 Files go to **~/Movies/MacPocketKnife** by default. The folder is created when
 needed. Names use local time: **Screen yyyy-MM-dd HH.mm.ss.mp4**, with a numbered
-suffix when necessary to avoid overwriting recordings. **Show recordings in
+suffix when necessary to avoid overwriting recordings. Recording multiple displays
+adds ` - <display name>` before the suffix and extension. Names are sanitized
+and duplicate display names receive distinct numbered filenames. **Show recordings in
 Finder** opens the folder. Edit or trim recordings with **QuickTime Player**.
 
 In **Settings > Tools > Screen recording**, enable or disable the global shortcut,
@@ -119,7 +136,7 @@ macOS may show a consent dialog for direct screen and audio access the first tim
 you record (and periodically); it can appear in that recording.
 
 Capture uses native display pixels, H.264 video, and 48 kHz stereo AAC system
-audio. Only the main display is recorded; protected content may be blank or
+audio. Each selected display gets its own video; protected content may be blank or
 silent, and high resolutions or 60 fps can exceed the Mac's encoder capacity.
 Slow storage may cause dropped frames. At least 1 GB of free space is required
 to start; recording stops and finalizes if space becomes critically low or

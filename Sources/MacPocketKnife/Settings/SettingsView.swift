@@ -191,6 +191,9 @@ private struct ToolsPane: View {
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in
+            model.connectedRecordingDisplays = RecordingDisplays().connectedDisplays()
+        }
     }
 
     private var dictationSection: some View {
@@ -217,6 +220,27 @@ private struct ToolsPane: View {
 
     private var screenRecordingSection: some View {
         Section("Screen recording") {
+            Picker("Screen to record", selection: $model.recordingTargetSelection) {
+                Text("Main display").tag(ScreenRecordingTarget.mainDisplay)
+                ForEach(model.connectedRecordingDisplays, id: \.uuid) { display in
+                    Text(display.name).tag(ScreenRecordingTarget.display(uuid: display.uuid))
+                }
+                if let name = model.disconnectedRecordingDisplayName {
+                    Text(name + " (not connected)").tag(model.settings.screenRecordingTarget)
+                }
+                Text("All screens (separate videos)").tag(ScreenRecordingTarget.allDisplays)
+                if #available(macOS 14.0, *) {
+                    Text("Ask each time").tag(ScreenRecordingTarget.askEachTime)
+                } else if model.settings.screenRecordingTarget == .askEachTime {
+                    Text("Ask each time (requires macOS 14)").tag(ScreenRecordingTarget.askEachTime).disabled(true)
+                }
+            }
+            if model.disconnectedRecordingDisplayName != nil {
+                Text("The main display is used while the saved display is not connected.").font(.caption)
+            }
+            if #unavailable(macOS 14.0) {
+                Text("Choosing with preview and Ask each time require macOS 14. The main display is used meanwhile.").font(.caption)
+            }
             Toggle("Enable global shortcut (Control-Option-Command)", isOn: $model.settings.screenRecordingHotkeyEnabled)
             Picker("Shortcut key", selection: $model.settings.screenRecordingHotkeyKey) {
                 ForEach(AppSettings.dictationKeys, id: \.self) { key in Text(key).tag(key) }

@@ -42,6 +42,23 @@ public final class SettingsModel: ObservableObject {
 
     @Published public var dictationHotkeyError: String?
     @Published public var screenRecordingHotkeyError: String?
+    @Published public var connectedRecordingDisplays: [DisplayInfo] = []
+
+    public var recordingTargetSelection: ScreenRecordingTarget {
+        get { settings.screenRecordingTarget }
+        set {
+            settings.screenRecordingTarget = newValue
+            if case .display(let uuid) = newValue {
+                settings.screenRecordingDisplayName = connectedRecordingDisplays.first { $0.uuid == uuid }?.name
+            } else { settings.screenRecordingDisplayName = nil }
+        }
+    }
+
+    public var disconnectedRecordingDisplayName: String? {
+        guard case .display(let uuid) = settings.screenRecordingTarget else { return nil }
+        guard !connectedRecordingDisplays.contains(where: { $0.uuid == uuid }) else { return nil }
+        return settings.screenRecordingDisplayName ?? "Saved display"
+    }
 
     public var dictationLanguageSelection: String {
         get { settings.dictationLanguage ?? "" }

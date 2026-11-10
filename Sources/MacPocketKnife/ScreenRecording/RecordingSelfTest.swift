@@ -60,7 +60,7 @@ enum RecordingSelfTest {
                 let configuration = ScreenRecordingConfiguration(
                     frameRate: 30, showsCursor: false, includesMicrophone: includesMicrophone
                 )
-                try await recorder.start(configuration: configuration, destination: destination)
+                try await recorder.start(configuration: configuration, destination: destination, display: nil, content: nil)
                 print(String(format: "RECORDING_STARTED %.9f", Date().timeIntervalSince1970))
                 fflush(stdout)
                 try await Task.sleep(for: .seconds(seconds))

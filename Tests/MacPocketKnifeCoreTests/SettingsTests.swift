@@ -230,3 +230,24 @@ func appSettingsValidationHandlesNonfiniteDuration(duration: Double) {
     let encoded = try JSONEncoder().encode(enabled)
     #expect(try JSONDecoder().decode(AppSettings.self, from: encoded) == enabled)
 }
+
+@Test @MainActor func screenRecordingDisplayPreferences() {
+    let store = InMemorySettingsStore()
+    let model = SettingsModel(store: store, secrets: InMemorySecretStore())
+    let display = DisplayInfo(uuid: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA", name: "Studio",
+                              pixelWidth: 1920, pixelHeight: 1080, isMain: false)
+    model.connectedRecordingDisplays = [display]
+    model.recordingTargetSelection = .display(uuid: display.uuid)
+    #expect(model.recordingTargetSelection == .display(uuid: display.uuid))
+    #expect(model.settings.screenRecordingDisplayName == "Studio")
+    #expect(model.disconnectedRecordingDisplayName == nil)
+    model.connectedRecordingDisplays = []
+    #expect(model.disconnectedRecordingDisplayName == "Studio")
+    model.settings.screenRecordingDisplayName = nil
+    #expect(model.disconnectedRecordingDisplayName == "Saved display")
+    model.recordingTargetSelection = .allDisplays
+    #expect(model.settings.screenRecordingDisplayName == nil)
+    #expect(model.disconnectedRecordingDisplayName == nil)
+    model.recordingTargetSelection = .display(uuid: display.uuid)
+    #expect(model.settings.screenRecordingDisplayName == nil)
+}

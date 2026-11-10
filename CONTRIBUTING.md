@@ -49,6 +49,13 @@ not cover the microphone, hotkey or clipboard path.
 
 ## Screen recording tests
 
+Core tests use display, recorder factory, and picker fakes to cover target
+resolution, settings migration, collision-safe filenames, cancellation, and
+multiple streams without screen permissions. Run `swift test --enable-code-coverage`
+for coverage. In a GUI session, also verify two connected displays, unplugging
+one while recording, the macOS 14+ preview picker's selection/cancel paths and
+cleanup, and the macOS 13 fallback. These hardware/UI checks are manual.
+
 Run `scripts/run-screenrec-test.sh` in a logged-in GUI session. It plays sound and
 flashes full-screen colours for about 15 seconds per attempt. Keep the Mac awake
 and unlocked, with an audio output device selected. The first run exits with
@@ -68,7 +75,7 @@ The test generates a deterministic 12-second H.264/AAC clip with twelve unique
 colour/tone pairs and short silent gaps. A synthetic clip is deliberately preferred
 over downloading a video: it is offline, reproducible, and has precisely aligned
 video and audio boundaries. A separate bundled AVPlayer app plays it while the
-shipped `ScreenCaptureKitRecorder.start(configuration:destination:)` / `stop()`
+shipped `ScreenCaptureKitRecorder.start(configuration:destination:display:content:)` / `stop()`
 path records the main display. No product settings are read or changed.
 
 The verifier requires video and audio tracks, non-silent PCM, matching durations,
