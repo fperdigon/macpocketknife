@@ -17,8 +17,18 @@
 set -eu
 cd "$(dirname "$0")/.."
 ci=false
-case "${1:-}" in --ci) ci=true ;; "") ;; *) echo "Usage: $0 [--ci]" >&2; exit 2 ;; esac
+mic=false
+for option in "$@"; do
+    case "$option" in --ci) ci=true ;; --mic) mic=true ;; *) echo "Usage: $0 [--ci | --mic]" >&2; exit 2 ;; esac
+done
 if [ "${GITHUB_ACTIONS:-}" = true ]; then ci=true; fi
+if $mic && $ci; then echo "--mic is local only and cannot be used in CI." >&2; exit 2; fi
+mic_option=""
+verify_option=""
+if $mic; then
+    mic_option=--mic
+    verify_option=--expect-single-audio-track
+fi
 work="$PWD/build/screenrec-test/$(date +%Y%m%d-%H%M%S)-$$"
 mkdir -p "$work"
 echo "Screen recording test artifacts: $work"
@@ -265,13 +275,13 @@ run_attempt() {
     sleep 1
     if $ci; then
         run_with_timeout "$recorder_timeout" "$app/Contents/MacOS/MacPocketKnife" \
-            --record-selftest "$recording" "$record_seconds" > "$work/recorder-$attempt.log" 2>&1 || code=$?
+            --record-selftest "$recording" "$record_seconds" ${mic_option:+"$mic_option"} > "$work/recorder-$attempt.log" 2>&1 || code=$?
     else
         local result="$work/recorder-$attempt.result" log="$work/recorder-$attempt.log" status=""
         # LaunchServices makes the bundle responsible for its own TCC permission.
         run_with_timeout "$recorder_timeout" open -n -W -a "$app" \
             --stdout "$log" --stderr "$log" \
-            --args --record-selftest "$recording" "$record_seconds" --result-file "$result" \
+            --args --record-selftest "$recording" "$record_seconds" ${mic_option:+"$mic_option"} --result-file "$result" \
             > "$work/recorder-launch-$attempt.log" 2>&1 || code=$?
         if [ "$code" -ne 124 ]; then
             if [ -f "$result" ]; then
@@ -292,7 +302,7 @@ run_attempt() {
     player_pid=""
     if [ "$code" -ne 0 ]; then cat "$work/player-$attempt.log"; return "$code"; fi
     run_with_timeout 90 "$work/verify" "$work/reference.mp4" "$recording" --seconds "$record_seconds" \
-        --frames "$work/frames-$attempt" > "$work/verify-$attempt.log" 2>&1 || code=$?
+        ${verify_option:+"$verify_option"} --frames "$work/frames-$attempt" > "$work/verify-$attempt.log" 2>&1 || code=$?
     cat "$work/verify-$attempt.log"
     return "$code"
 }

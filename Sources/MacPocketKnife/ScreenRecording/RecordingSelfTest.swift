@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import AppKit
-import CoreGraphics
+@preconcurrency import AppKit
+@preconcurrency import CoreGraphics
 import MacPocketKnifeCore
 
 /// Hidden CLI entry point. No settings, permission prompts or product UI are initialized.
@@ -60,7 +60,11 @@ enum RecordingSelfTest {
                 let configuration = ScreenRecordingConfiguration(
                     frameRate: 30, showsCursor: false, includesMicrophone: includesMicrophone
                 )
-                try await recorder.start(configuration: configuration, destination: destination, display: nil, content: nil)
+                let outcome = try await recorder.start(configuration: configuration, destination: destination, display: nil, content: nil)
+                if includesMicrophone && outcome != .included {
+                    _ = try? await recorder.stop()
+                    fail(outcome.notice ?? "Microphone was not included.", code: 1)
+                }
                 print(String(format: "RECORDING_STARTED %.9f", Date().timeIntervalSince1970))
                 fflush(stdout)
                 try await Task.sleep(for: .seconds(seconds))

@@ -43,6 +43,7 @@ struct Analysis {
     var peak = 0.0
     var hasVideo = false
     var hasAudio = false
+    var audioTrackCount = 0
 }
 func colorDistance(_ color: [Double], _ rgb: [Double]) -> Double {
     var distance: Double = 0.0
@@ -155,7 +156,9 @@ func analyze(_ path: String) async throws -> Analysis {
         }
         if reader.status == .failed { throw reader.error! }
     }
-    if let track = try await asset.loadTracks(withMediaType: .audio).first {
+    let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+    result.audioTrackCount = audioTracks.count
+    if let track = audioTracks.first {
         result.hasAudio = true
         result.audioDuration = try await track.load(.timeRange).duration.seconds
         let settings: [String: Any] = [AVFormatIDKey: kAudioFormatLinearPCM,
@@ -318,7 +321,7 @@ func selftest() -> Bool {
 do {
     let args = CommandLine.arguments
     if args.count == 2 && args[1] == "--selftest" { exit(selftest() ? 0 : 1) }
-    guard args.count >= 3 else { throw NSError(domain: "Usage: verify <reference.mp4> <recording.mp4> [--seconds N] [--frames directory]", code: 2) }
+    guard args.count >= 3 else { throw NSError(domain: "Usage: verify <reference.mp4> <recording.mp4> [--seconds N] [--frames directory] [--expect-single-audio-track]", code: 2) }
     var seconds: Double?
     if let index = args.firstIndex(of: "--seconds") {
         guard index + 1 < args.count, let value = Double(args[index + 1]), value.isFinite, value > 0 else {
@@ -328,7 +331,12 @@ do {
     }
     let reference = try await analyze(args[1])
     let recording = try await analyze(args[2])
-    let passed = verify(reference, recording, seconds: seconds, strictDurations: args[1] == args[2])
+    var passed = verify(reference, recording, seconds: seconds, strictDurations: args[1] == args[2])
+    if args.contains("--expect-single-audio-track") {
+        let single = recording.audioTrackCount == 1
+        print("\(single ? "PASS" : "FAIL") exactly one audio track (observed \(recording.audioTrackCount))")
+        passed = passed && single
+    }
     if let index = args.firstIndex(of: "--frames"), index + 1 < args.count, recording.hasVideo {
         let directory = URL(fileURLWithPath: args[index + 1])
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

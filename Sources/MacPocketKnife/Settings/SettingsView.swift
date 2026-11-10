@@ -258,11 +258,11 @@ private struct ToolsPane: View {
             }
             Toggle("Show cursor", isOn: $model.settings.screenRecordingShowsCursor)
             if #available(macOS 15.0, *) {
-                Toggle("Include microphone", isOn: $model.settings.screenRecordingIncludesMicrophone)
+                Toggle("Include microphone (mixed into the same audio track)", isOn: $model.settings.screenRecordingIncludesMicrophone)
             } else {
                 Text("Include microphone requires macOS 15 or later.").font(.caption)
             }
-            Text("System audio is included. The app's own audio is excluded.").font(.caption)
+            Text("Microphone capture needs macOS 15+. System audio is included. The app's own audio is excluded.").font(.caption)
             LabeledContent("Save folder") {
                 Text(model.settings.screenRecordingFolder).font(.caption).textSelection(.enabled)
             }

@@ -118,12 +118,29 @@ public enum ScreenRecordingFailure: Error, Equatable, Sendable {
     }
 }
 
+public enum RecordingMicrophoneOutcome: Equatable, Sendable {
+    case included, disabled, denied, unsupported, unavailable
+
+    public var notice: String? {
+        switch self {
+        case .included, .disabled: return nil
+        case .denied:
+            return "Saved without your microphone: allow it in System Settings > Privacy & Security > Microphone."
+        case .unsupported:
+            return "Saved without your microphone: microphone capture needs macOS 15 or later."
+        case .unavailable:
+            return "Saved without your microphone: the microphone could not start. Check your input device."
+        }
+    }
+}
+
 @MainActor
 public protocol ScreenRecording: AnyObject {
     /// A nil failure means the user or system ended sharing normally.
     var onFailure: (@MainActor (ScreenRecordingFailure?) -> Void)? { get set }
+    /// Microphone limitations are nonfatal and returned as the actual capture outcome.
     func start(configuration: ScreenRecordingConfiguration, destination: URL,
-               display: DisplayInfo?, content: (any ScreenRecordingContent)?) async throws
+               display: DisplayInfo?, content: (any ScreenRecordingContent)?) async throws -> RecordingMicrophoneOutcome
     /// Finalizes the writer, removes empty or unusable output, and returns a usable file only.
     func stop() async throws -> URL?
 }

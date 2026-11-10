@@ -67,7 +67,7 @@ public struct NoticeComposer: NoticeComposing {
                body: "\(savedFile.lastPathComponent)\nFolder: \(savedFile.deletingLastPathComponent().path)")
     }
 
-    public func composeScreenRecording(savedFiles: [URL], interruptedDisplays: [String] = []) -> Notice {
+    public func composeScreenRecording(savedFiles: [URL], interruptedDisplays: [String] = [], notice: String? = nil) -> Notice {
         let title: String
         var body: String
         if let first = savedFiles.first {
@@ -81,6 +81,7 @@ public struct NoticeComposer: NoticeComposing {
         if !interruptedDisplays.isEmpty {
             body += "\nSharing ended early: " + interruptedDisplays.joined(separator: ", ") + "."
         }
+        if let notice { body += "\n" + notice }
         return Notice(kind: .info, title: title, body: body)
     }
 
