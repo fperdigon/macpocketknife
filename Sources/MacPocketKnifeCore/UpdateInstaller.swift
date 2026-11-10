@@ -13,7 +13,8 @@
 // limitations under the License.
 
 import CryptoKit
-import Foundation
+@preconcurrency import Foundation
+import Darwin
 
 public enum UpdateInstallError: Error, Equatable, Sendable, LocalizedError {
     case downloadFailed(Int)
@@ -175,15 +176,29 @@ public struct LocalUpdateFileSystem: UpdateFileSystem {
 }
 
 public struct UpdateProcessRunner: UpdateProcessRunning {
-    public init() {}
+    private let timeout: TimeInterval
+
+    public init(timeout: TimeInterval = 120) {
+        self.timeout = timeout
+    }
     public func run(_ executable: String, arguments: [String]) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
+        let finished = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in finished.signal() }
         try process.run()
-        process.waitUntilExit()
+        guard finished.wait(timeout: .now() + timeout) == .success else {
+            process.terminate()
+            // A child can ignore SIGTERM. Bound cleanup too, then force its exit.
+            if finished.wait(timeout: .now() + 1) == .timedOut {
+                kill(process.processIdentifier, SIGKILL)
+                _ = finished.wait(timeout: .now() + 1)
+            }
+            throw UpdateInstallError.operationFailed
+        }
         guard process.terminationStatus == 0 else { throw UpdateInstallError.operationFailed }
     }
 }

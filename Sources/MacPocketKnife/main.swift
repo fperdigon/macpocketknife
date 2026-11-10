@@ -21,7 +21,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem?
     private let controller = CaffeinateController.makeKeepAwake()
     private let unlockController = CaffeinateController.makeKeepUnlocked()
-    private let localNotifier = LocalNotifier()
+    // Disable launch notifications and permission prompts during the quit smoke test.
+    private let localNotifier = LocalNotifier(bundleIdentifier: QuitSelfTest.isRequested ? nil : Bundle.main.bundleIdentifier)
     private let settings = SettingsModel(
         store: UserDefaultsSettingsStore(defaults: .standard), secrets: KeychainSecretStore()
     )
@@ -54,6 +55,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         disk: RecordingDiskSpace(), files: RecordingFiles(), notices: localNotifier
     )
     private var isTerminating = false
+    private var terminationReplied = false
+    private var terminationWatchdog: Timer?
     private lazy var hotkey = GlobalHotkey()
     private var settingsSubscription: AnyCancellable?
     private var hotkeyPreferences: String?
@@ -71,6 +74,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let authorization = NSMenuItem(title: "Notifications: checking…", action: nil, keyEquivalent: "")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if QuitSelfTest.isRequested {
+            print("quit-selftest: applicationDidFinishLaunching")
+            fflush(stdout)
+        }
+        QuitSelfTest.trace("engine init start")
         let engine = AssistantEngine(
             powerMonitor: IOKitPowerMonitor(), assertionProvider: IOKitAssertionProvider(),
             classifier: ProcessClassifier(processTable: SysctlProcessTable()),
@@ -78,7 +86,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             channels: [localNotifier, TelegramNotifier(settings: settings, secrets: KeychainSecretStore())],
             terminator: SignalProcessTerminator(), settings: settings
         )
+        QuitSelfTest.trace("engine init done")
+        QuitSelfTest.trace("status item creation start")
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        QuitSelfTest.trace("status item creation done; image setup start")
         if let image = NSImage(named: "MenuBarIcon") {
             image.isTemplate = true
             image.size = NSSize(width: 18, height: 18)
@@ -89,6 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             item.button?.image = image
         }
 
+        QuitSelfTest.trace("image setup done; menu construction start")
         let menu = NSMenu()
         menu.autoenablesItems = false
         menu.delegate = self
@@ -130,58 +142,100 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let aboutItem = NSMenuItem(title: "About MacPocketKnife", action: #selector(showAbout), keyEquivalent: "")
         aboutItem.target = self
         menu.addItem(aboutItem)
+        QuitSelfTest.trace("updates menu item start")
         menu.addItem(updates.menuItem())
+        QuitSelfTest.trace("updates menu item done")
         let quit = NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         quit.target = NSApp
         menu.addItem(quit)
         item.menu = menu
         statusItem = item
+        QuitSelfTest.trace("menu construction done; hotkey wiring start")
 
         dictation.onChange = { [weak self] in self?.refreshStatus() }
+        QuitSelfTest.trace("dictation wiring done")
         screenRecording.onChange = { [weak self] in self?.refreshStatus() }
+        QuitSelfTest.trace("screen recording wiring done")
         hotkey.actions[1] = { [weak self] in self?.toggleDictation() }
         hotkey.actions[2] = { [weak self] in
             guard let self else { return }
             self.recordingOptionsWindow?.close()
             self.screenRecording.toggle(settings: self.settings.settings)
         }
+        QuitSelfTest.trace("hotkey wiring done; settings subscription start")
         settingsSubscription = settings.$settings.sink { [weak self] value in
             self?.configureHotkey(value)
         }
+        QuitSelfTest.trace("settings subscription done")
         self.engine = engine
         engine.onChange = { [weak self] in self?.refreshStatus() }
+        QuitSelfTest.trace("controller restore start")
         controller.restoreIfNeeded()
+        QuitSelfTest.trace("controller restore done; unlock controller restore start")
         unlockController.restoreIfNeeded()
-        updates.checkInBackgroundIfDue()
-        if CommandLine.arguments.contains("--show-settings") { showSettings() }
-        if let argumentIndex = CommandLine.arguments.firstIndex(of: "--snapshot-settings"),
+        QuitSelfTest.trace("unlock controller restore done; update check start")
+        if !QuitSelfTest.isRequested {
+            updates.checkInBackgroundIfDue()
+        }
+        QuitSelfTest.trace("update check done; settings launch actions start")
+        if !QuitSelfTest.isRequested, CommandLine.arguments.contains("--show-settings") { showSettings() }
+        if !QuitSelfTest.isRequested,
+           let argumentIndex = CommandLine.arguments.firstIndex(of: "--snapshot-settings"),
            CommandLine.arguments.indices.contains(argumentIndex + 1) {
             let directory = URL(fileURLWithPath: CommandLine.arguments[argumentIndex + 1], isDirectory: true)
             try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             showSettings()
             settingsWindow?.captureSnapshots(in: directory) { NSApp.terminate(nil) }
         }
+        QuitSelfTest.trace("settings launch actions done; controller wiring start")
         for controller in [controller, unlockController] {
             controller.onChange = { [weak self] _ in
                 self?.refreshStatus()
                 Task { @MainActor [weak self] in await self?.engine?.evaluate() }
             }
         }
+        QuitSelfTest.trace("controller wiring done; engine start task creation start")
         Task { @MainActor in
+            QuitSelfTest.trace("engine.start start")
             await engine.start()
+            QuitSelfTest.trace("engine.start done; notification authorization start")
             // The system authorization state persists across launches.
             updateAuthorization(await localNotifier.requestAuthorizationIfNeeded())
+            QuitSelfTest.trace("notification authorization done")
         }
+        QuitSelfTest.trace("engine start task created")
+        QuitSelfTest.trace("didFinishLaunching done")
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if isTerminating { return .terminateLater }
+        switch screenRecording.state {
+        case .idle, .error:
+            return .terminateNow
+        case .starting, .recording, .stopping:
+            break
+        }
         isTerminating = true
+        // terminate() can nest AppKit's modal loop inside a main-queue callback.
+        // Main-actor tasks may then starve; a common-mode timer still fires.
+        let watchdog = Timer(timeInterval: 8, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.finishTermination(sender) }
+        }
+        terminationWatchdog = watchdog
+        RunLoop.main.add(watchdog, forMode: .common)
         Task { @MainActor in
             await screenRecording.stopAndWait()
-            sender.reply(toApplicationShouldTerminate: true)
+            finishTermination(sender)
         }
         return .terminateLater
+    }
+
+    private func finishTermination(_ sender: NSApplication) {
+        guard !terminationReplied else { return }
+        terminationReplied = true
+        terminationWatchdog?.invalidate()
+        terminationWatchdog = nil
+        sender.reply(toApplicationShouldTerminate: true)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -264,6 +318,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func configureHotkey(_ value: AppSettings) {
+        QuitSelfTest.trace("configureHotkey start")
+        defer { QuitSelfTest.trace("configureHotkey done") }
         let dictationSignature = "\(value.dictationHotkeyEnabled)-\(value.dictationHotkeyKey)"
         let screenSignature = "\(value.screenRecordingHotkeyEnabled)-\(value.screenRecordingHotkeyKey)"
         let signature = dictationSignature + screenSignature
@@ -353,6 +409,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 }
 
 RecordingSelfTest.runIfRequested()
+QuitSelfTest.runIfRequested()
 
 // Read-only CLI output must not depend on the AppKit launch event loop.
 if CommandLine.arguments.contains("--print-status") {

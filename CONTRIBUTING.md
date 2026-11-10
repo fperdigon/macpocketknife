@@ -21,6 +21,10 @@ If the environment blocks SwiftPM's build sandbox, use `--disable-sandbox` with
 `swift build` and `swift test`. The existing Keychain integration test is skipped
 when `CI` is set; use `CI=1 swift test` to avoid accessing the real Keychain.
 
+Run `sh scripts/run-quit-test.sh` after building to check that the normally launched
+app exits with status 0 within 15 seconds using the hidden `--quit-selftest` flag.
+CI also runs this check against the Xcode-built executable.
+
 Run `swift run MacPocketKnife --print-status` to print the current status line once and exit.
 Run `swift run MacPocketKnife --show-settings` to open Settings immediately after launch.
 Run `swift run MacPocketKnife --snapshot-settings <directory>` to save PNG snapshots of every Settings tab and exit.
