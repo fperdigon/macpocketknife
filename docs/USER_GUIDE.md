@@ -89,11 +89,19 @@ finished if the text is sensitive.
 ## Screen recording
 
 Choose **Record screen…** below **Dictate** to open the **Screen Recording**
-window. Choose **Main display**, a connected display (shown with its name and
-pixel resolution), or **All screens (separate videos)**. Set **Include microphone**,
+window. Screen cards show live screenshot previews, display names, pixel resolutions,
+and a **Main** label. In **One screen** mode, click a card: an accent border and
+checkmark identify the selected screen, and the others are dimmed. In **All screens
+(separate videos)** mode, every card is highlighted and labeled **Video 1**,
+**Video 2**, and so on. This mode is hidden when only one display is connected.
+Scroll horizontally to see more screens. Previews refresh when the window opens
+or connected displays change; press **Refresh** for an updated snapshot. Previews
+need Screen Recording permission; opening the window never requests it. Without
+permission, placeholders appear until permission is requested when you press Start.
+Set **Include microphone**,
 **Show cursor**, and **Frame rate** (30 or 60 fps), then press **Start recording**.
-All-screens mode creates one video per screen. On macOS 14+, **Choose with preview…**
-opens the system picker with live display thumbnails after you press Start;
+All-screens mode creates one video per screen. On macOS 14+, **Choose with system
+picker…** dims the cards and opens the system picker after you press Start;
 cancelling the picker starts nothing. **Cancel** or closing the options window
 starts nothing. Opening it again brings the existing window to the front.
 
