@@ -54,6 +54,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         disk: RecordingDiskSpace(), files: RecordingFiles(), notices: localNotifier
     )
     private var isTerminating = false
+    private var terminationReplied = false
+    private var terminationWatchdog: Timer?
     private lazy var hotkey = GlobalHotkey()
     private var settingsSubscription: AnyCancellable?
     private var hotkeyPreferences: String?
@@ -176,12 +178,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if isTerminating { return .terminateLater }
+        switch screenRecording.state {
+        case .idle, .error:
+            return .terminateNow
+        case .starting, .recording, .stopping:
+            break
+        }
         isTerminating = true
+        // terminate() can nest AppKit's modal loop inside a main-queue callback.
+        // Main-actor tasks may then starve; a common-mode timer still fires.
+        let watchdog = Timer(timeInterval: 8, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.finishTermination(sender) }
+        }
+        terminationWatchdog = watchdog
+        RunLoop.main.add(watchdog, forMode: .common)
         Task { @MainActor in
             await screenRecording.stopAndWait()
-            sender.reply(toApplicationShouldTerminate: true)
+            finishTermination(sender)
         }
         return .terminateLater
+    }
+
+    private func finishTermination(_ sender: NSApplication) {
+        guard !terminationReplied else { return }
+        terminationReplied = true
+        terminationWatchdog?.invalidate()
+        terminationWatchdog = nil
+        sender.reply(toApplicationShouldTerminate: true)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -353,6 +376,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 }
 
 RecordingSelfTest.runIfRequested()
+QuitSelfTest.runIfRequested()
 
 // Read-only CLI output must not depend on the AppKit launch event loop.
 if CommandLine.arguments.contains("--print-status") {

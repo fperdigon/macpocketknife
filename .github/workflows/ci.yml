@@ -119,6 +119,8 @@ jobs:
             -configuration Debug -derivedDataPath build/Xcode \
             CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO \
             build 2>&1 | tee xcodebuild.log
+      - name: Test normal app termination
+        run: sh scripts/run-quit-test.sh build/Xcode/Build/Products/Debug/MacPocketKnife
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import AppKit
+@preconcurrency import AppKit
 import MacPocketKnifeCore
 
 /// AppKit presentation only; comparisons, installation, and scheduling live in Core.
@@ -118,6 +118,10 @@ final class UpdateController: NSObject {
             let helper = UpdateInstaller.relaunchProcess(appURL: app)
             beforeQuit()
             try helper.run()
+            // Schedule before terminate(), which may enter a nested modal loop.
+            // beforeQuit has already flushed the state needed by the replacement.
+            let fallback = Timer(timeInterval: 5, repeats: false) { _ in exit(0) }
+            RunLoop.main.add(fallback, forMode: .common)
             NSApp.terminate(nil)
         } catch {
             Self.alert("Update failed", safeMessage(error))

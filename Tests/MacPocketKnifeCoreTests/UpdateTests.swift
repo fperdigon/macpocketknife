@@ -291,3 +291,30 @@ private struct FakeDownloadFiles: UpdateDownloadFileSystem {
     }
     #expect(try await checker.check(channel: .nightly, build: updateBuild) == .upToDate(current: "nightly abcdef1"))
 }
+
+@Test func updateProcessTimeout() {
+    let runner = UpdateProcessRunner(timeout: 0.05)
+    let start = Date()
+    #expect(throws: UpdateInstallError.operationFailed) {
+        try runner.run("/bin/sleep", arguments: ["30"])
+    }
+    #expect(Date().timeIntervalSince(start) < 5)
+}
+
+@Test func updateProcessExitStatus() throws {
+    let runner = UpdateProcessRunner(timeout: 5)
+    try runner.run("/usr/bin/true", arguments: [])
+    #expect(throws: UpdateInstallError.operationFailed) {
+        try runner.run("/usr/bin/false", arguments: [])
+    }
+}
+
+@Test func updateProcessTimeoutKillsChildIgnoringTermination() {
+    let runner = UpdateProcessRunner(timeout: 0.2)
+    let start = Date()
+    #expect(throws: UpdateInstallError.operationFailed) {
+        // Ignored signals survive exec, so sleep also ignores SIGTERM.
+        try runner.run("/bin/sh", arguments: ["-c", "trap '' TERM; exec /bin/sleep 30"])
+    }
+    #expect(Date().timeIntervalSince(start) < 5)
+}
