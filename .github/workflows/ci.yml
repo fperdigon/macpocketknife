@@ -120,12 +120,17 @@ jobs:
             CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO \
             build 2>&1 | tee xcodebuild.log
       - name: Test normal app termination
-        run: sh scripts/run-quit-test.sh build/Xcode/Build/Products/Debug/MacPocketKnife
+        run: |
+          set -o pipefail
+          trap 'tail -n 100 quit-selftest.log' EXIT
+          sh scripts/run-quit-test.sh build/Xcode/Build/Products/Debug/MacPocketKnife 2>&1 | tee quit-selftest.log
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: xcodebuild-log
-          path: xcodebuild.log
+          path: |
+            xcodebuild.log
+            quit-selftest.log
 
   speech-test:
     runs-on: macos-15

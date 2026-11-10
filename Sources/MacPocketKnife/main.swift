@@ -73,6 +73,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let authorization = NSMenuItem(title: "Notifications: checking…", action: nil, keyEquivalent: "")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if CommandLine.arguments.contains("--quit-selftest") {
+            print("quit-selftest: applicationDidFinishLaunching")
+            fflush(stdout)
+        }
         let engine = AssistantEngine(
             powerMonitor: IOKitPowerMonitor(), assertionProvider: IOKitAssertionProvider(),
             classifier: ProcessClassifier(processTable: SysctlProcessTable()),

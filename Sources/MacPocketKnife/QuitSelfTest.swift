@@ -19,6 +19,8 @@
 enum QuitSelfTest {
     static func runIfRequested() {
         guard CommandLine.arguments.contains("--quit-selftest") else { return }
+        print("quit-selftest: started")
+        fflush(stdout)
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
             print("quit-selftest: requesting normal termination")
             fflush(stdout)
