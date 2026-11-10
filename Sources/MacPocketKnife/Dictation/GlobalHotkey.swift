@@ -23,6 +23,8 @@ final class GlobalHotkey {
     var actions: [UInt32: @MainActor () -> Void] = [:]
 
     init() {
+        QuitSelfTest.trace("GlobalHotkey init start")
+        defer { QuitSelfTest.trace("GlobalHotkey init done") }
         var event = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         InstallEventHandler(GetApplicationEventTarget(), { _, event, context in
             var identifier = EventHotKeyID()
@@ -41,6 +43,8 @@ final class GlobalHotkey {
     }
 
     func register(id: UInt32, enabled: Bool, key: String) -> Bool {
+        QuitSelfTest.trace("GlobalHotkey register \(id) start")
+        defer { QuitSelfTest.trace("GlobalHotkey register \(id) done") }
         if let previous = hotkeys.removeValue(forKey: id) { UnregisterEventHotKey(previous) }
         keys.removeValue(forKey: id)
         guard enabled else { return true }

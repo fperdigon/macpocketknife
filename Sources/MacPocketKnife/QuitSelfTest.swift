@@ -17,6 +17,12 @@
 /// Exercise the normal launch and termination delegate without recording permissions.
 @MainActor
 enum QuitSelfTest {
+    static func trace(_ label: String) {
+        guard CommandLine.arguments.contains("--quit-selftest") else { return }
+        print("quit-selftest: trace \(label)")
+        fflush(stdout)
+    }
+
     static func runIfRequested() {
         guard CommandLine.arguments.contains("--quit-selftest") else { return }
         print("quit-selftest: started")
