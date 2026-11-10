@@ -40,6 +40,12 @@ Screen Recording permission is required;
 microphone permission is requested only when that option is enabled. Access can
 be revoked in System Settings > Privacy & Security.
 
+The options window takes in-memory screenshots of your screens only to show
+previews. These screenshots are never saved or sent, and are released when the
+window closes. Previews refresh on opening, display changes, or manual refresh.
+They are captured only if Screen Recording permission is already granted; opening
+the options window does not request permission.
+
 The macOS 14+ system picker and its live display thumbnails stay on this Mac.
 Neither picker selections nor thumbnails are uploaded. Display UUIDs and the last
 selected display name are stored locally with preferences.
