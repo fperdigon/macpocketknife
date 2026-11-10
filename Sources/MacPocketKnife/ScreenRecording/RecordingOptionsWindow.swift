@@ -80,6 +80,7 @@ struct RecordingOptionsWindow: View {
             refresh()
         }
         .onChange(of: model.recordingTargetSelection) { _ in resize() }
+        .onChange(of: thumbnails.polling.isDenied) { _ in resize() }
     }
 
     private var previewCards: some View {
@@ -87,8 +88,6 @@ struct RecordingOptionsWindow: View {
             HStack {
                 Text("Screens").font(.headline)
                 Spacer()
-                Button(action: refresh) { Label("Refresh", systemImage: "arrow.clockwise") }
-                    .controlSize(.small)
             }
             ScrollView(.horizontal) {
                 HStack(alignment: .top, spacing: 12) {
@@ -118,9 +117,13 @@ struct RecordingOptionsWindow: View {
         } else if screenCards.mode == .allScreens {
             Text("All-screens mode creates one video per screen.").font(.caption)
         }
-        if !thumbnails.hasPermission {
-            Text("Preview needs Screen Recording permission. It will be requested when you press Start.")
-                .font(.caption).foregroundStyle(.secondary)
+        if thumbnails.polling.isDenied {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Screen preview unavailable. Allow Screen Recording permission in System Settings. macOS may ask again after an app update.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Button("Allow screen preview") { thumbnails.allowPreview() }
+                    .controlSize(.small)
+            }
         }
     }
 
@@ -131,12 +134,12 @@ struct RecordingOptionsWindow: View {
                 if let image = thumbnails.images[card.display.uuid] {
                     Image(decorative: image, scale: 2)
                         .resizable().aspectRatio(contentMode: .fit)
-                } else if thumbnails.isLoading {
+                } else if thumbnails.polling.isLoading && !thumbnails.polling.isDenied {
                     ProgressView().controlSize(.small)
                 } else {
                     VStack(spacing: 6) {
                         Image(systemName: "display")
-                        Text(thumbnails.hasPermission ? "Preview unavailable" : card.display.name)
+                        Text(thumbnails.polling.isDenied ? "Preview unavailable" : card.display.name)
                             .font(.caption).lineLimit(2)
                     }
                     .foregroundStyle(.secondary)
@@ -182,6 +185,15 @@ final class RecordingOptionsWindowController: NSWindowController, NSWindowDelega
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
+        let center = NotificationCenter.default
+        center.addObserver(self, selector: #selector(windowBecameKey(_:)),
+                           name: NSWindow.didBecomeKeyNotification, object: window)
+        center.addObserver(self, selector: #selector(visibilityChanged(_:)),
+                           name: NSWindow.didChangeOcclusionStateNotification, object: window)
+        center.addObserver(self, selector: #selector(visibilityChanged(_:)),
+                           name: NSApplication.didHideNotification, object: nil)
+        center.addObserver(self, selector: #selector(visibilityChanged(_:)),
+                           name: NSApplication.didUnhideNotification, object: nil)
         let view = RecordingOptionsWindow(model: model, thumbnails: thumbnails,
                                           refresh: { [weak self] in self?.refresh() },
                                           resize: { [weak self] in self?.resizeToFit() }, start: { [weak self] in
@@ -197,16 +209,39 @@ final class RecordingOptionsWindowController: NSWindowController, NSWindowDelega
 
     func show() {
         showWindow(nil)
-        refresh()
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
+        synchronizeVisibility()
     }
 
     private func refresh() {
-        guard window?.isVisible == true else { return }
+        guard previewsAreVisible else { return }
         model.connectedRecordingDisplays = RecordingDisplays().connectedDisplays()
-        thumbnails.refresh(displays: model.connectedRecordingDisplays)
+        thumbnails.start(displays: model.connectedRecordingDisplays)
         resizeToFit()
+    }
+
+    private var previewsAreVisible: Bool {
+        guard let window else { return false }
+        return window.isVisible && !window.isMiniaturized && !NSApp.isHidden
+            && window.occlusionState.contains(.visible)
+    }
+
+    @objc private func visibilityChanged(_ notification: Notification) {
+        synchronizeVisibility()
+    }
+
+    @objc private func windowBecameKey(_ notification: Notification) {
+        synchronizeVisibility()
+        thumbnails.resume()
+    }
+
+    private func synchronizeVisibility() {
+        if previewsAreVisible {
+            if !thumbnails.polling.isActive { refresh() }
+        } else {
+            thumbnails.stop()
+        }
     }
 
     private func resizeToFit() {
@@ -215,11 +250,11 @@ final class RecordingOptionsWindowController: NSWindowController, NSWindowDelega
     }
 
     override func close() {
-        thumbnails.clear()
+        thumbnails.stop()
         super.close()
     }
 
     func windowWillClose(_ notification: Notification) {
-        thumbnails.clear()
+        thumbnails.stop()
     }
 }
