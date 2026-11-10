@@ -15,7 +15,7 @@ notifications or optional Telegram. Settings are available in tabs, and updates
 can be checked and installed in the app.
 
 - **Screen recording:** choose a display or record all screens as separate MP4 videos with system audio using Control-Option-Command-R; live preview picker on macOS 14+, microphone included by default on macOS 15+ and mixed with system audio into one track, with local files and notifications. Files use `Screen yyyy-MM-dd HH.mm.ss.mp4`, adding the display name for multiple videos.
-  If microphone access is denied or unavailable, video and system audio still record with a notice. Turn it off with **Record with microphone** in the menu or **Settings > Tools > Screen recording**.
+  If microphone access is denied or unavailable, video and system audio still record with a notice. Turn it off in **Settings > Tools > Screen recording > Include microphone**.
 - **Dictation:** on-device voice-to-text from the default microphone, toggled from the menu or Control-Option-Command-T, with the transcript copied to the clipboard.
 
 ## Protection rules

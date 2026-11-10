@@ -32,8 +32,7 @@ Screen recording uses Apple's ScreenCaptureKit and AVAssetWriter to save selecte
 displays and system audio locally as H.264/AAC MP4 files. The app's own audio is
 excluded. Microphone capture is included by default on
 macOS 15 or later and mixed with system audio into one 48 kHz stereo AAC track.
-Turn it off with **Record with microphone** in the menu or **Settings > Tools >
-Screen recording > Include microphone (mixed into the same audio track)**.
+Turn it off in **Settings > Tools > Screen recording > Include microphone**.
 If permission is denied or the microphone cannot start, video and system audio
 still record, with a notice in the menu and saved notification. On older macOS,
 the microphone is omitted and the macOS 15 requirement is shown once per session.
