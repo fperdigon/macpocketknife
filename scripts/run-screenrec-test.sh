@@ -17,8 +17,19 @@
 set -eu
 cd "$(dirname "$0")/.."
 ci=false
-case "${1:-}" in --ci) ci=true ;; "") ;; *) echo "Usage: $0 [--ci]" >&2; exit 2 ;; esac
+mic=false
+for option in "$@"; do
+    case "$option" in --ci) ci=true ;; --mic) mic=true ;; *) echo "Usage: $0 [--ci | --mic]" >&2; exit 2 ;; esac
+done
 if [ "${GITHUB_ACTIONS:-}" = true ]; then ci=true; fi
+if $mic && $ci; then echo "--mic is local only and cannot be used in CI." >&2; exit 2; fi
+mic_option=""
+verify_option=""
+mic_floor=""
+if $mic; then
+    mic_option=--mic
+    verify_option=--expect-single-audio-track
+fi
 work="$PWD/build/screenrec-test/$(date +%Y%m%d-%H%M%S)-$$"
 mkdir -p "$work"
 echo "Screen recording test artifacts: $work"
@@ -27,6 +38,9 @@ tee "$work/driver.log" < "$work/driver.pipe" &
 exec > "$work/driver.pipe" 2>&1
 rm "$work/driver.pipe"
 player_pid=""
+test_completed=false
+mic_attempt_completed=false
+phase="setup"
 record_seconds=12.5
 recorder_timeout=53 # ceil(record_seconds + 40)
 
@@ -101,8 +115,19 @@ finish() {
     local code=$?
     set +e # Diagnostics must never prevent helper cleanup.
     trap - EXIT
+    # Bash 3.2 can report $? = 0 here after a nounset abort in a function
+    # invoked through ||. Only the end of the full test may authorize success.
+    if ! $test_completed; then
+        echo "FAIL screen recording test did not complete ($phase phase)"
+        if [ "$code" -eq 0 ]; then code=1; fi
+    fi
+    if $mic && ! $mic_attempt_completed; then
+        echo "FAIL requested microphone attempt did not complete"
+        if [ "$code" -eq 0 ]; then code=1; fi
+    fi
     if [ "$code" -eq 124 ] || [ -f "$work/timed-out" ]; then code=30; fi
     if [ "$code" -ne 0 ]; then
+        echo "FAIL screen recording test (exit $code)"
         echo "== Failure diagnostics: artifact sizes"
         find "$work" -type f -exec ls -lh {} +
         echo "== Helper processes before cleanup"
@@ -128,6 +153,13 @@ finish() {
         kill -KILL $targets 2>/dev/null || true
     fi
     rm -f "$work"/active-*
+    if $mic; then
+        echo "== MIC-DEBUG summary"
+        for log in "$work"/recorder-*.log; do
+            [ -f "$log" ] || continue
+            grep '^MIC-DEBUG' "$log" || true
+        done
+    fi
     echo "Screen recording test exit: $code; artifacts: $work"
     if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
         {
@@ -137,6 +169,12 @@ finish() {
             for log in "$work"/verify-*.log; do
                 if [ -f "$log" ]; then cat "$log"; fi
             done
+            if $mic; then
+                for log in "$work"/recorder-*.log; do
+                    [ -f "$log" ] || continue
+                    grep '^MIC-DEBUG' "$log" || true
+                done
+            fi
             echo '```'
         } >> "$GITHUB_STEP_SUMMARY"
     fi
@@ -265,13 +303,13 @@ run_attempt() {
     sleep 1
     if $ci; then
         run_with_timeout "$recorder_timeout" "$app/Contents/MacOS/MacPocketKnife" \
-            --record-selftest "$recording" "$record_seconds" > "$work/recorder-$attempt.log" 2>&1 || code=$?
+            --record-selftest "$recording" "$record_seconds" ${mic_option:+"$mic_option"} > "$work/recorder-$attempt.log" 2>&1 || code=$?
     else
         local result="$work/recorder-$attempt.result" log="$work/recorder-$attempt.log" status=""
         # LaunchServices makes the bundle responsible for its own TCC permission.
         run_with_timeout "$recorder_timeout" open -n -W -a "$app" \
             --stdout "$log" --stderr "$log" \
-            --args --record-selftest "$recording" "$record_seconds" --result-file "$result" \
+            --args --record-selftest "$recording" "$record_seconds" ${mic_option:+"$mic_option"} --result-file "$result" \
             > "$work/recorder-launch-$attempt.log" 2>&1 || code=$?
         if [ "$code" -ne 124 ]; then
             if [ -f "$result" ]; then
@@ -291,11 +329,33 @@ run_attempt() {
     wait "$player_pid" || code=$?
     player_pid=""
     if [ "$code" -ne 0 ]; then cat "$work/player-$attempt.log"; return "$code"; fi
+    local energy_options=()
+    if [ -n "$mic_option" ]; then
+        energy_options=(--expect-mic-energy --mic-floor-file "$mic_floor")
+    fi
     run_with_timeout 90 "$work/verify" "$work/reference.mp4" "$recording" --seconds "$record_seconds" \
-        --frames "$work/frames-$attempt" > "$work/verify-$attempt.log" 2>&1 || code=$?
+        ${energy_options[@]+"${energy_options[@]}"} ${verify_option:+"$verify_option"} --frames "$work/frames-$attempt" > "$work/verify-$attempt.log" 2>&1 || code=$?
     cat "$work/verify-$attempt.log"
+    if [ -n "$mic_option" ]; then mic_attempt_completed=true; fi
     return "$code"
 }
+
+# Local mic runs measure the actual capture/encoder floor before asking for speech.
+# The CI path remains a single system-only capture with its existing checks.
+if $mic; then
+    phase="system-only baseline"
+    mic_option=""
+    verify_option=""
+    echo "== System-only baseline for microphone energy (microphone disabled)"
+    baseline_code=0
+    run_attempt || baseline_code=$?
+    if [ "$baseline_code" -ne 0 ]; then exit "$baseline_code"; fi
+    mic_floor="$work/recording-$attempt.mp4"
+    mic_option=--mic
+    verify_option=--expect-single-audio-track
+    echo "== Microphone capture: please speak throughout the next recording."
+fi
+if $mic; then phase="microphone capture"; else phase="system-only capture"; fi
 
 # Each mutation is attempted at most once, regardless of whether missing audio or
 # permission is encountered first. All retries replay the clip from the beginning.
@@ -344,4 +404,9 @@ if [ "$code" -ne 0 ]; then
     echo "FAIL screen recording test (exit $code)"
     exit "$code"
 fi
+if $mic && ! $mic_attempt_completed; then
+    echo "FAIL requested microphone attempt did not complete"
+    exit 1
+fi
+test_completed=true
 echo "PASS screen recording video, system audio, ordered correlation and A/V sync"

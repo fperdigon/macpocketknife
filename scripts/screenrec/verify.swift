@@ -15,6 +15,7 @@
 @preconcurrency import AVFoundation
 @preconcurrency import AppKit
 import Foundation
+import Accelerate
 
 let halfChannel: Double = 128.0 / 255.0
 let threeQuarterChannel: Double = 192.0 / 255.0
@@ -43,6 +44,8 @@ struct Analysis {
     var peak = 0.0
     var hasVideo = false
     var hasAudio = false
+    var audioTrackCount = 0
+    var nonToneDB = -Double.infinity
 }
 func colorDistance(_ color: [Double], _ rgb: [Double]) -> Double {
     var distance: Double = 0.0
@@ -108,6 +111,69 @@ func toneSample(frequency: Double, position: Int) -> Float {
     let amplitude: Double = 0.35 * sin(phase)
     return Float(amplitude)
 }
+/// Hann-windowed 8192-point spectra (5.86 Hz/bin). Remove +/-30 Hz around
+/// detected known tones, then compare remaining 100 Hz...4 kHz energy to tone energy.
+/// Integrate both over the same windows; silence cannot qualify as microphone energy.
+func nonToneEnergyDB(_ samples: [Float], transitions: [Double] = []) -> Double {
+    let count = 8192
+    guard samples.count >= count,
+          let setup = vDSP_DFT_zop_CreateSetup(nil, vDSP_Length(count), .FORWARD) else { return -.infinity }
+    defer { vDSP_DFT_DestroySetup(setup) }
+    let binHz: Double = 48_000.0 / Double(count)
+    let firstBin = Int(ceil(100.0 / binHz))
+    let lastBin = Int(floor(4000.0 / binHz))
+    let zeros = [Float](repeating: 0, count: count)
+    var real = zeros
+    var outputReal = zeros
+    var outputImaginary = zeros
+    var window = zeros
+    for index in 0..<count {
+        let phase: Double = 2.0 * Double.pi * Double(index) / Double(count)
+        window[index] = Float(0.5 - 0.5 * cos(phase))
+    }
+    var toneEnergy = 0.0
+    var otherEnergy = 0.0
+    for start in stride(from: 0, through: samples.count - count, by: count) {
+        let startTime: Double = Double(start) / 48_000.0
+        let endTime: Double = Double(start + count) / 48_000.0
+        // Classifier boundaries have 100 ms resolution. Skip transition transients
+        // so tone switching itself cannot masquerade as speech or raise the floor.
+        let crossesTransition = transitions.contains { $0 >= startTime - 0.15 && $0 <= endTime + 0.15 }
+        if crossesTransition { continue }
+        for index in 0..<count { real[index] = samples[start + index] * window[index] }
+        vDSP_DFT_Execute(setup, real, zeros, &outputReal, &outputImaginary)
+        var powers = [Double](repeating: 0, count: lastBin + 1)
+        for bin in firstBin...lastBin {
+            let r = Double(outputReal[bin])
+            let i = Double(outputImaginary[bin])
+            powers[bin] = r * r + i * i
+        }
+        var peaks: [Int] = []
+        for frequency in frequencies {
+            let lower = Int(ceil((frequency - 12) / binHz))
+            let upper = Int(floor((frequency + 12) / binHz))
+            let peak = (lower...upper).max(by: { powers[$0] < powers[$1] })!
+            peaks.append(peak)
+        }
+        let strongest = peaks.map { powers[$0] }.max() ?? 0
+        guard strongest > 0 else { continue }
+        let detected = peaks.filter { powers[$0] >= strongest * 0.001 }
+        for bin in firstBin...lastBin {
+            let isTone = detected.contains { abs(Double(bin - $0) * binHz) <= 30 }
+            if isTone { toneEnergy += powers[bin] }
+            else { otherEnergy += powers[bin] }
+        }
+    }
+    guard toneEnergy > 0, otherEnergy > 0 else { return -.infinity }
+    return 10 * log10(otherEnergy / toneEnergy)
+}
+
+/// A soft local diagnostic: ambient noise or speaker bleed can pass; quiet speech
+/// can fail. Require >-45 dB relative to tones AND >10 dB above the system-only run.
+func microphoneEnergyPresent(_ measured: Double, floor: Double) -> Bool {
+    measured.isFinite && measured > max(-45, floor + 10)
+}
+
 func append(_ slot: Int?, at time: Double, to events: inout [Event]) {
     if let slot, events.last?.slot != slot { events.append(Event(slot: slot, time: time)) }
 }
@@ -119,7 +185,7 @@ func reader(_ asset: AVAsset, track: AVAssetTrack, settings: [String: Any]) thro
     guard reader.startReading() else { throw reader.error! }
     return (reader, output)
 }
-func analyze(_ path: String) async throws -> Analysis {
+func analyze(_ path: String, measureMicEnergy: Bool = false) async throws -> Analysis {
     let asset = AVURLAsset(url: URL(fileURLWithPath: path))
     var result = Analysis()
     result.span = try await asset.load(.duration).seconds
@@ -155,7 +221,9 @@ func analyze(_ path: String) async throws -> Analysis {
         }
         if reader.status == .failed { throw reader.error! }
     }
-    if let track = try await asset.loadTracks(withMediaType: .audio).first {
+    let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+    result.audioTrackCount = audioTracks.count
+    if let track = audioTracks.first {
         result.hasAudio = true
         result.audioDuration = try await track.load(.timeRange).duration.seconds
         let settings: [String: Any] = [AVFormatIDKey: kAudioFormatLinearPCM,
@@ -189,10 +257,18 @@ func analyze(_ path: String) async throws -> Analysis {
             result.rms = sqrt(meanEnergy)
             result.peak = Double(samples.map { abs($0) }.max() ?? 0)
         }
+        var spectralTransitions: [Double] = []
+        var previousTone: Int?
         for start in Swift.stride(from: 0, through: max(-1, samples.count - 4800), by: 4800) {
             let startTime: Double = Double(start) / 48_000.0
             let centerTime: Double = startTime + 0.05
-            append(tone(samples[start..<(start + 4800)]), at: centerTime, to: &result.audio)
+            let currentTone = tone(samples[start..<(start + 4800)])
+            if currentTone != previousTone { spectralTransitions.append(centerTime) }
+            previousTone = currentTone
+            append(currentTone, at: centerTime, to: &result.audio)
+        }
+        if measureMicEnergy {
+            result.nonToneDB = nonToneEnergyDB(samples, transitions: spectralTransitions)
         }
     }
     return result
@@ -286,6 +362,36 @@ func selftest() -> Bool {
         passed = passed && tone(samples[...]) == index
     }
     passed = passed && tone([Float](repeating: 0, count: 4800)[...]) == nil
+    let systemOnly: [Float] = (0..<48_000).map { toneSample(frequency: 440, position: $0) }
+    let withMic: [Float] = systemOnly.enumerated().map { index, value in
+        let mic: Float = toneSample(frequency: 2300, position: index) * 0.03
+        return value + mic
+    }
+    let floor = nonToneEnergyDB(systemOnly)
+    let measured = nonToneEnergyDB(withMic)
+    passed = !microphoneEnergyPresent(floor, floor: floor) && passed
+    passed = microphoneEnergyPresent(measured, floor: floor) && passed
+    passed = !microphoneEnergyPresent(-46, floor: -80) && passed
+    passed = !microphoneEnergyPresent(-35, floor: -40) && passed
+    passed = !microphoneEnergyPresent(.nan, floor: floor) && passed
+    passed = nonToneEnergyDB([Float](repeating: 0, count: 8192)) == -.infinity && passed
+    passed = nonToneEnergyDB([]) == -.infinity && passed
+    passed = nonToneEnergyDB(systemOnly, transitions: [0.1, 0.3, 0.5, 0.7, 0.9]) == -.infinity && passed
+    print(String(format: "Selftest system-only non-tone floor=%.2f dB; injected mic=%.2f dB", floor, measured))
+    // Abrupt tone switches and the reference's 40 ms silent gaps are not speech.
+    var gapped: [Float] = []
+    var transitions: [Double] = []
+    for slot in 0..<3 {
+        transitions.append(Double(slot) + 0.05)
+        transitions.append(Double(slot) + 0.95)
+        for frame in 0..<48_000 {
+            let active = frame >= 1920 && frame < 46_080
+            gapped.append(active ? toneSample(frequency: frequencies[slot], position: frame) : 0)
+        }
+    }
+    let gappedFloor = nonToneEnergyDB(gapped, transitions: transitions)
+    passed = gappedFloor < -45 && passed
+    print(String(format: "Selftest switched/gapped tones non-tone floor=%.2f dB", gappedFloor))
     let forward = (0..<12).map { Event(slot: $0, time: Double($0)) }
     passed = passed && lcs(forward, forward) == 12 && lcs(forward, forward.reversed()) == 1
     print("\(passed ? "PASS" : "FAIL") classifier, twelve tone detectors, silence, ordered matching")
@@ -318,7 +424,7 @@ func selftest() -> Bool {
 do {
     let args = CommandLine.arguments
     if args.count == 2 && args[1] == "--selftest" { exit(selftest() ? 0 : 1) }
-    guard args.count >= 3 else { throw NSError(domain: "Usage: verify <reference.mp4> <recording.mp4> [--seconds N] [--frames directory]", code: 2) }
+    guard args.count >= 3 else { throw NSError(domain: "Usage: verify <reference.mp4> <recording.mp4> [--seconds N] [--frames directory] [--expect-single-audio-track] [--expect-mic-energy --mic-floor-file system-only.mp4]", code: 2) }
     var seconds: Double?
     if let index = args.firstIndex(of: "--seconds") {
         guard index + 1 < args.count, let value = Double(args[index + 1]), value.isFinite, value > 0 else {
@@ -326,9 +432,29 @@ do {
         }
         seconds = value
     }
+    let expectMic = args.contains("--expect-mic-energy")
+    var micFloor: Analysis?
+    if expectMic {
+        guard let index = args.firstIndex(of: "--mic-floor-file"), index + 1 < args.count else {
+            throw NSError(domain: "--expect-mic-energy requires --mic-floor-file from a system-only capture", code: 2)
+        }
+        micFloor = try await analyze(args[index + 1], measureMicEnergy: true)
+    }
     let reference = try await analyze(args[1])
-    let recording = try await analyze(args[2])
-    let passed = verify(reference, recording, seconds: seconds, strictDurations: args[1] == args[2])
+    let recording = try await analyze(args[2], measureMicEnergy: expectMic)
+    var passed = verify(reference, recording, seconds: seconds, strictDurations: args[1] == args[2])
+    if let micFloor {
+        let threshold = max(-45, micFloor.nonToneDB + 10)
+        let present = microphoneEnergyPresent(recording.nonToneDB, floor: micFloor.nonToneDB)
+        print(String(format: "%@ SOFT microphone non-tone energy=%.2f dB relative to tone; system-only floor=%.2f dB; require >%.2f dB (100 Hz-4 kHz, tones +/-30 Hz removed)",
+            present ? "PASS" : "WARN", recording.nonToneDB, micFloor.nonToneDB, threshold))
+        // Deliberately does not change exit status: local speech is not deterministic.
+    }
+    if args.contains("--expect-single-audio-track") {
+        let single = recording.audioTrackCount == 1
+        print("\(single ? "PASS" : "FAIL") exactly one audio track (observed \(recording.audioTrackCount))")
+        passed = passed && single
+    }
     if let index = args.firstIndex(of: "--frames"), index + 1 < args.count, recording.hasVideo {
         let directory = URL(fileURLWithPath: args[index + 1])
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

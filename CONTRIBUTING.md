@@ -68,8 +68,32 @@ build. After code changes, run
 re-add `build/ScreenRecTest.app`, and allow the one-time macOS consent dialog before
 rerunning the test; otherwise the dialog covers the screen and fails the colour
 check. The test never grants
-permission or changes audio devices locally. `--mic` is available only on the
-hidden recorder CLI; the end-to-end test checks system audio without a microphone.
+permission or changes audio devices locally. Run `scripts/run-screenrec-test.sh --mic` locally on macOS 15+ to include the
+microphone and require exactly one mixed audio track while retaining the system
+tone ordering and A/V sync checks. This mode requires microphone permission and
+fails if capture falls back without it. It cannot be combined with CI mode.
+The default end-to-end test checks system audio without a microphone.
+
+The local `--mic` mode first records a system-only baseline, then asks you to
+speak throughout a second capture. Its soft microphone check measures spectral
+energy from 100 Hz to 4 kHz after removing +/-30 Hz around detected reference
+tones. It uses Hann-windowed 8192-sample spectra and skips windows near tone
+transitions. Non-tone energy must exceed -45 dB relative to the tones and be
+more than 10 dB above the measured system-only baseline. The verifier prints
+`PASS SOFT` or `WARN SOFT` and the measured level; this diagnostic does not change
+the exit status. Ambient noise or speaker bleed can pass, so it is evidence of
+additional audio rather than proof of intelligible speech. You can rerun it with
+`verify reference.mp4 recording.mp4 --expect-mic-energy --mic-floor-file baseline.mp4`.
+Both capture phases must complete; an aborted baseline or missing microphone
+attempt prints `FAIL` and exits non-zero, even if the shell loses the abort status.
+
+Only `--record-selftest` enables the recorder's stderr `MIC-DEBUG` block, printed
+at stop and repeated in the local mic harness summary. It includes the start
+outcome, actual `captureMicrophone` setting, per-source buffer/conversion counts,
+first ASBD, PTS offsets from first video, maximum host-time lag, retained and late
+dropped mixer frames, and converted sample peak/RMS. Product recordings stay
+silent. The mic mixer retains one second before draining; late overlapping
+buffers retain their undrained suffix without shifting their timestamps.
 
 The test generates a deterministic 12-second H.264/AAC clip with twelve unique
 colour/tone pairs and short silent gaps. A synthetic clip is deliberately preferred

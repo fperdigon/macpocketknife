@@ -65,6 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let keepUnlocked = NSMenuItem(title: "Keep unlocked", action: nil, keyEquivalent: "")
     private let dictate = NSMenuItem(title: "Dictate", action: nil, keyEquivalent: "")
     private let recordScreen = NSMenuItem(title: "Record screen", action: nil, keyEquivalent: "")
+    private let recordWithMicrophone = NSMenuItem(title: "Record with microphone", action: nil, keyEquivalent: "")
     private let screenRecordingStatus = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let dictationStatus = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let authorization = NSMenuItem(title: "Notifications: checking…", action: nil, keyEquivalent: "")
@@ -109,6 +110,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         recordScreen.target = self
         recordScreen.action = #selector(toggleScreenRecording)
         menu.addItem(recordScreen)
+        if #available(macOS 15.0, *) {
+            recordWithMicrophone.target = self
+            recordWithMicrophone.action = #selector(toggleRecordingMicrophone)
+            menu.addItem(recordWithMicrophone)
+        }
         let recordings = NSMenuItem(title: "Show recordings in Finder", action: #selector(showRecordings), keyEquivalent: "")
         recordings.target = self
         menu.addItem(recordings)
@@ -206,6 +212,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         dictate.toolTip = recording ? "\(dictation.wordCount) words transcribed" : "Transcribe speech on this Mac and copy it to the clipboard."
         let screenActive = screenRecording.state == .recording
         let screenBusy = screenActive || screenRecording.state == .starting || screenRecording.state == .stopping
+        recordWithMicrophone.state = settings.settings.screenRecordingIncludesMicrophone ? .on : .off
+        recordWithMicrophone.isEnabled = !screenBusy
         let screenLabel = screenBusy ? "Stop recording" : "Record screen"
         let screenKey = settings.settings.screenRecordingHotkeyKey
         let screenShortcut = settings.settings.screenRecordingHotkeyEnabled ? " (⌃⌥⌘\(screenKey))" : ""
@@ -340,6 +348,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             locale = Locale.current
         }
         dictation.toggle(locale: locale)
+    }
+
+    @objc private func toggleRecordingMicrophone() {
+        settings.settings.screenRecordingIncludesMicrophone.toggle()
+        refreshStatus()
     }
 
     @objc private func toggleScreenRecording() {
