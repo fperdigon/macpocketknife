@@ -88,27 +88,34 @@ finished if the text is sensitive.
 
 ## Screen recording
 
-Choose **Record screen** below **Dictate**, or press **Control-Option-Command-R**,
-to record your selected display and system audio: videos, calls, and other apps' sound.
-The app's own audio is excluded. A red **⏺ mm:ss** indicator shows elapsed time;
-it appears alongside the Dictation dot when both tools are active. Choose
-**Stop recording** or press the shortcut again to finalize the file. A local
-**Screen recording saved** notification includes the file name and folder path.
+Choose **Record screen…** below **Dictate** to open the **Screen Recording**
+window. Choose **Main display**, a connected display (shown with its name and
+pixel resolution), or **All screens (separate videos)**. Set **Include microphone**,
+**Show cursor**, and **Frame rate** (30 or 60 fps), then press **Start recording**.
+All-screens mode creates one video per screen. On macOS 14+, **Choose with preview…**
+opens the system picker with live display thumbnails after you press Start;
+cancelling the picker starts nothing. **Cancel** or closing the options window
+starts nothing. Opening it again brings the existing window to the front.
 
-With two or more connected displays, **Record screen** opens a submenu listing
-names and pixel resolutions. The main display is labelled and the saved default
-has a checkmark. Choose a display or **All screens (separate videos)** for this
-recording. On macOS 14+, **Choose with preview…** opens the system picker with
-live display thumbnails; cancelling starts nothing.
+Changes are saved as you make them and stay in sync with **Settings > Tools >
+Screen recording**, which still holds the same options. Press
+**Control-Option-Command-R** to start immediately with the saved options, without
+opening the options window. A saved **Choose with preview…** choice opens the
+preview picker instead.
 
-Set the shortcut's default in **Settings > Tools > Screen recording > Screen to
-record**: **Main display**, a connected display, **All screens (separate videos)**,
-or **Ask each time** (macOS 14+). Ask each time opens the preview picker. Displays
-are remembered by stable UUID. If a saved display is disconnected, the main
-display is used and the menu explains the fallback; reconnecting restores the
-saved choice. On macOS 13, a previously saved Ask each time choice uses the main
-display. If one screen stops sharing or is unplugged, the other recordings
-continue; the final notification mentions the interrupted display.
+Recordings include your selected display and system audio: videos, calls, and
+other apps' sound. The app's own audio is excluded. A red **⏺ mm:ss** indicator
+shows elapsed time; it appears alongside the Dictation dot when both tools are
+active. Choose **Stop recording** or press the shortcut again to finalize the
+file. A local **Screen recording saved** notification includes the file name
+and folder path.
+
+Displays are remembered by stable UUID. If a saved display is disconnected,
+the options window and Settings show **(not connected)** and explain that the
+main display is used; reconnecting restores the saved choice. On macOS 13,
+a previously saved preview choice uses the main display. If one screen stops
+sharing or is unplugged, the other recordings continue; the final notification
+mentions the interrupted display.
 
 Files go to **~/Movies/MacPocketKnife** by default. The folder is created when
 needed. Names use local time: **Screen yyyy-MM-dd HH.mm.ss.mp4**, with a numbered

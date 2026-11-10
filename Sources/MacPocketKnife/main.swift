@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import AppKit
-import Combine
+@preconcurrency import AppKit
+@preconcurrency import Combine
 import MacPocketKnifeCore
 
 @MainActor
@@ -59,12 +59,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var hotkeyPreferences: String?
     private var engine: AssistantEngine?
     private var settingsWindow: SettingsWindowController?
+    private var recordingOptionsWindow: RecordingOptionsWindowController?
     private let statusLine = NSMenuItem(title: "Reading power state…", action: nil, keyEquivalent: "")
     private let blockersLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let keepAwake = NSMenuItem(title: "Keep awake", action: nil, keyEquivalent: "")
     private let keepUnlocked = NSMenuItem(title: "Keep unlocked", action: nil, keyEquivalent: "")
     private let dictate = NSMenuItem(title: "Dictate", action: nil, keyEquivalent: "")
-    private let recordScreen = NSMenuItem(title: "Record screen", action: nil, keyEquivalent: "")
+    private let recordScreen = NSMenuItem(title: "Record screen…", action: nil, keyEquivalent: "")
     private let screenRecordingStatus = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let dictationStatus = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let authorization = NSMenuItem(title: "Notifications: checking…", action: nil, keyEquivalent: "")
@@ -139,7 +140,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         dictation.onChange = { [weak self] in self?.refreshStatus() }
         screenRecording.onChange = { [weak self] in self?.refreshStatus() }
         hotkey.actions[1] = { [weak self] in self?.toggleDictation() }
-        hotkey.actions[2] = { [weak self] in self?.toggleScreenRecording() }
+        hotkey.actions[2] = { [weak self] in
+            guard let self else { return }
+            self.recordingOptionsWindow?.close()
+            self.screenRecording.toggle(settings: self.settings.settings)
+        }
         settingsSubscription = settings.$settings.sink { [weak self] value in
             self?.configureHotkey(value)
         }
@@ -206,13 +211,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         dictate.toolTip = recording ? "\(dictation.wordCount) words transcribed" : "Transcribe speech on this Mac and copy it to the clipboard."
         let screenActive = screenRecording.state == .recording
         let screenBusy = screenActive || screenRecording.state == .starting || screenRecording.state == .stopping
-        let screenLabel = screenBusy ? "Stop recording" : "Record screen"
+        let screenLabel = screenBusy ? "Stop recording" : "Record screen…"
         let screenKey = settings.settings.screenRecordingHotkeyKey
         let screenShortcut = settings.settings.screenRecordingHotkeyEnabled ? " (⌃⌥⌘\(screenKey))" : ""
         recordScreen.title = screenLabel + screenShortcut
         recordScreen.state = screenBusy ? .on : .off
         recordScreen.isEnabled = screenRecording.state != .stopping
-        rebuildRecordingMenu(busy: screenBusy)
         let screenError = screenRecording.lastError ?? settings.screenRecordingHotkeyError ?? screenRecording.lastNotice
         screenRecordingStatus.title = screenError ?? ""
         screenRecordingStatus.isHidden = screenError == nil
@@ -226,52 +230,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let error = dictation.lastError ?? settings.dictationHotkeyError
         dictationStatus.title = error ?? ""
         dictationStatus.isHidden = error == nil
-    }
-
-    private func rebuildRecordingMenu(busy: Bool) {
-        recordScreen.submenu = nil
-        recordScreen.action = #selector(toggleScreenRecording)
-        guard !busy else { return }
-        let displays = RecordingDisplays().connectedDisplays()
-        settings.connectedRecordingDisplays = displays
-        guard displays.count >= 2 else { return }
-        let submenu = NSMenu()
-        submenu.autoenablesItems = false
-        let defaultTarget = settings.settings.screenRecordingTarget
-        for display in displays {
-            let mainLabel = display.isMain ? " (Main)" : ""
-            let title = "\(display.name) — \(display.pixelWidth) × \(display.pixelHeight)\(mainLabel)"
-            let item = NSMenuItem(title: title, action: #selector(recordSelectedScreen(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = display.uuid
-            let selected = defaultTarget == .display(uuid: display.uuid) || (defaultTarget == .mainDisplay && display.isMain)
-            item.state = selected ? .on : .off
-            submenu.addItem(item)
-        }
-        submenu.addItem(.separator())
-        let all = NSMenuItem(title: "All screens (separate videos)", action: #selector(recordAllScreens), keyEquivalent: "")
-        all.target = self
-        all.state = defaultTarget == .allDisplays ? .on : .off
-        submenu.addItem(all)
-        if #available(macOS 14.0, *) {
-            let preview = NSMenuItem(title: "Choose with preview…", action: #selector(recordWithPreview), keyEquivalent: "")
-            preview.target = self
-            preview.state = defaultTarget == .askEachTime ? .on : .off
-            submenu.addItem(preview)
-        }
-        recordScreen.action = nil
-        recordScreen.submenu = submenu
-    }
-
-    @objc private func recordSelectedScreen(_ sender: NSMenuItem) {
-        guard let uuid = sender.representedObject as? String else { return }
-        screenRecording.toggle(settings: settings.settings, target: .display(uuid: uuid))
-    }
-    @objc private func recordAllScreens() {
-        screenRecording.toggle(settings: settings.settings, target: .allDisplays)
-    }
-    @objc private func recordWithPreview() {
-        screenRecording.toggle(settings: settings.settings, target: .askEachTime)
     }
 
     private func updateAuthorization(_ state: AuthorizationState) {
@@ -343,7 +301,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func toggleScreenRecording() {
-        screenRecording.toggle(settings: settings.settings)
+        switch screenRecording.state {
+        case .starting, .recording, .stopping:
+            screenRecording.toggle(settings: settings.settings)
+        case .idle, .error:
+            if recordingOptionsWindow == nil {
+                recordingOptionsWindow = RecordingOptionsWindowController(model: settings) { [weak self] target in
+                    guard let self else { return }
+                    self.screenRecording.toggle(settings: self.settings.settings, target: target)
+                }
+            }
+            recordingOptionsWindow?.show()
+        }
     }
 
     @objc private func showRecordings() {
