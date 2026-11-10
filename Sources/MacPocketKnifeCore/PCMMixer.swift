@@ -18,15 +18,21 @@ public struct PCMMixer: Sendable {
     private var blocks: [Int: [Float]] = [:]
     public private(set) var position: Int = 0
     public private(set) var endPosition: Int = 0
+    /// Source frames discarded because their timeline has already been drained.
+    public private(set) var droppedFrameCount: Int = 0
     public var bufferedFrameCapacity: Int { blocks.count * 1024 }
 
     public init() {}
 
-    public mutating func add(_ samples: [Float], at frame: Int) {
+    /// Returns the number of frames retained, preserving the timestamp of any suffix.
+    @discardableResult
+    public mutating func add(_ samples: [Float], at frame: Int) -> Int {
         let count = samples.count / 2
-        guard count > 0 else { return }
+        guard count > 0 else { return 0 }
         let end = frame + count
-        guard end > position else { return }
+        let dropped = min(count, max(0, position - frame))
+        droppedFrameCount += dropped
+        guard end > position else { return 0 }
         endPosition = max(endPosition, end)
         for index in max(position, frame)..<end {
             let key = index / 1024
@@ -36,6 +42,7 @@ public struct PCMMixer: Sendable {
             blocks[key]![offset] += samples[source]
             blocks[key]![offset + 1] += samples[source + 1]
         }
+        return count - dropped
     }
 
     /// Returns at most maxFrames, filling timeline gaps with silence. Clamp only

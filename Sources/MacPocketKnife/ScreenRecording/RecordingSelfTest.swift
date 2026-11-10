@@ -19,11 +19,13 @@ import MacPocketKnifeCore
 /// Hidden CLI entry point. No settings, permission prompts or product UI are initialized.
 @MainActor
 enum RecordingSelfTest {
+    static private(set) var microphoneDiagnosticsEnabled = false
     private static var resultFile: URL?
 
     static func runIfRequested() {
         let args = CommandLine.arguments
         guard args.contains("--record-selftest") else { return }
+        microphoneDiagnosticsEnabled = true
         var includesMicrophone = false
         var index = 4
         while index < args.count {
