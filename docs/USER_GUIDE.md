@@ -124,9 +124,8 @@ key different from Dictation's key; duplicate shortcuts are refused and explaine
 in settings. Carbon shortcuts use physical ANSI key positions and need no
 Accessibility access. **Include microphone (mixed into the same audio track)** defaults to on.
 On macOS 15+, your microphone and system audio are mixed into one 48 kHz stereo
-AAC track so players hear both. Turn it off with **Record with microphone** directly
-below **Record screen**, or in **Settings > Tools > Screen recording**. The menu
-checkmark cannot be changed during recording. If microphone access is denied or
+AAC track so players hear both. Turn it off in **Settings > Tools > Screen recording >
+Include microphone**. If microphone access is denied or
 the device cannot start, video and system audio still record; the menu status and
 saved notification explain the fallback. Allow access in **System Settings >
 Privacy & Security > Microphone** to include your voice. On older macOS versions,
