@@ -21,7 +21,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem?
     private let controller = CaffeinateController.makeKeepAwake()
     private let unlockController = CaffeinateController.makeKeepUnlocked()
-    private let localNotifier = LocalNotifier()
+    // Disable launch notifications and permission prompts during the quit smoke test.
+    private let localNotifier = LocalNotifier(bundleIdentifier: QuitSelfTest.isRequested ? nil : Bundle.main.bundleIdentifier)
     private let settings = SettingsModel(
         store: UserDefaultsSettingsStore(defaults: .standard), secrets: KeychainSecretStore()
     )
@@ -73,7 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let authorization = NSMenuItem(title: "Notifications: checking…", action: nil, keyEquivalent: "")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        if CommandLine.arguments.contains("--quit-selftest") {
+        if QuitSelfTest.isRequested {
             print("quit-selftest: applicationDidFinishLaunching")
             fflush(stdout)
         }
@@ -173,10 +174,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         QuitSelfTest.trace("controller restore done; unlock controller restore start")
         unlockController.restoreIfNeeded()
         QuitSelfTest.trace("unlock controller restore done; update check start")
-        updates.checkInBackgroundIfDue()
+        if !QuitSelfTest.isRequested {
+            updates.checkInBackgroundIfDue()
+        }
         QuitSelfTest.trace("update check done; settings launch actions start")
-        if CommandLine.arguments.contains("--show-settings") { showSettings() }
-        if let argumentIndex = CommandLine.arguments.firstIndex(of: "--snapshot-settings"),
+        if !QuitSelfTest.isRequested, CommandLine.arguments.contains("--show-settings") { showSettings() }
+        if !QuitSelfTest.isRequested,
+           let argumentIndex = CommandLine.arguments.firstIndex(of: "--snapshot-settings"),
            CommandLine.arguments.indices.contains(argumentIndex + 1) {
             let directory = URL(fileURLWithPath: CommandLine.arguments[argumentIndex + 1], isDirectory: true)
             try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

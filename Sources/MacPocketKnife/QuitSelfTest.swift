@@ -14,23 +14,37 @@
 
 @preconcurrency import AppKit
 
-/// Exercise the normal launch and termination delegate without recording permissions.
+/// Exercise the normal launch and termination delegate without launch prompts.
 @MainActor
 enum QuitSelfTest {
+    static let isRequested = CommandLine.arguments.contains("--quit-selftest")
+    private static var heartbeatCount = 0
+    private static var heartbeatTimer: Timer?
+
     static func trace(_ label: String) {
-        guard CommandLine.arguments.contains("--quit-selftest") else { return }
+        guard isRequested else { return }
         print("quit-selftest: trace \(label)")
         fflush(stdout)
     }
 
     static func runIfRequested() {
-        guard CommandLine.arguments.contains("--quit-selftest") else { return }
+        guard isRequested else { return }
         print("quit-selftest: started")
         fflush(stdout)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            print("quit-selftest: requesting normal termination")
-            fflush(stdout)
-            NSApp.terminate(nil)
+        let heartbeat = Timer(timeInterval: 1, repeats: true) { _ in
+            MainActor.assumeIsolated {
+                heartbeatCount += 1
+                print("quit-selftest: heartbeat \(heartbeatCount)")
+                fflush(stdout)
+                guard heartbeatCount == 2 else { return }
+                heartbeatTimer?.invalidate()
+                heartbeatTimer = nil
+                print("quit-selftest: requesting normal termination")
+                fflush(stdout)
+                NSApp.terminate(nil)
+            }
         }
+        heartbeatTimer = heartbeat
+        RunLoop.main.add(heartbeat, forMode: .common)
     }
 }
