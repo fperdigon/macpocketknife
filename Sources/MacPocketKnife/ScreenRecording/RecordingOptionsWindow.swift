@@ -81,7 +81,7 @@ struct RecordingOptionsWindow: View {
             refresh()
         }
         .onChange(of: model.recordingTargetSelection) { _ in resize() }
-        .onChange(of: thumbnails.polling.isDenied) { _ in resize() }
+        .onChange(of: thumbnails.polling.permissionStatus) { _ in resize() }
     }
 
     private var permissionsSection: some View {
@@ -90,10 +90,17 @@ struct RecordingOptionsWindow: View {
             HStack {
                 Text("Screen Recording")
                 Spacer()
-                Button("Open Screen Recording settings") {
-                    openSettings(.screenRecording)
+                if thumbnails.polling.permissionStatus == .allowed {
+                    Label("Allowed", systemImage: "checkmark")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(thumbnails.polling.permissionStatus.statusText)
+                        .foregroundStyle(.secondary)
+                    if let title = thumbnails.polling.permissionStatus.buttonTitle {
+                        Button(title) { openSettings(.screenRecording) }
+                            .controlSize(.small)
+                    }
                 }
-                .controlSize(.small)
             }
             RecordingMicrophoneAccessNotice(accessChanged: resize)
         }
@@ -211,6 +218,8 @@ final class RecordingOptionsWindowController: NSWindowController, NSWindowDelega
                            name: NSWindow.didBecomeKeyNotification, object: window)
         center.addObserver(self, selector: #selector(visibilityChanged(_:)),
                            name: NSWindow.didChangeOcclusionStateNotification, object: window)
+        center.addObserver(self, selector: #selector(windowBecameKey(_:)),
+                           name: NSApplication.didBecomeActiveNotification, object: nil)
         center.addObserver(self, selector: #selector(visibilityChanged(_:)),
                            name: NSApplication.didHideNotification, object: nil)
         center.addObserver(self, selector: #selector(visibilityChanged(_:)),

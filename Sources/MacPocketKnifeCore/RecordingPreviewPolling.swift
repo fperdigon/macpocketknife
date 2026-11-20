@@ -22,13 +22,22 @@ public struct RecordingPreviewPolling: Equatable, Sendable {
     public private(set) var states: [String: State] = [:]
     public private(set) var isActive = false
 
+    private var hasSuccessfulPreview = false
+
     public init() {}
+
+    public var permissionStatus: RecordingPermissionStatus {
+        if isDenied { return .screenDenied }
+        if hasSuccessfulPreview { return .allowed }
+        return isLoading ? .checking : .unknown
+    }
 
     public var isDenied: Bool { states.values.contains(.denied) }
     public var isLoading: Bool { states.values.contains(.loading) }
     public var shouldPoll: Bool { isActive && !states.isEmpty && !isDenied }
 
     public mutating func start(displayIDs: [String]) {
+        hasSuccessfulPreview = false
         states = Dictionary(uniqueKeysWithValues: Set(displayIDs).map { ($0, State.idle) })
         isActive = true
     }
@@ -42,11 +51,13 @@ public struct RecordingPreviewPolling: Equatable, Sendable {
 
     public mutating func complete(_ displayID: String, succeeded: Bool) {
         guard isActive, states[displayID] == .loading else { return }
+        if succeeded { hasSuccessfulPreview = true }
         states[displayID] = succeeded ? .loaded : .denied
     }
 
     public mutating func resume() {
         guard isActive else { return }
+        if isDenied { hasSuccessfulPreview = false }
         for (id, state) in states where state == .denied {
             states[id] = .idle
         }
@@ -54,6 +65,7 @@ public struct RecordingPreviewPolling: Equatable, Sendable {
 
     public mutating func stop() {
         isActive = false
+        hasSuccessfulPreview = false
         states = [:]
     }
 }

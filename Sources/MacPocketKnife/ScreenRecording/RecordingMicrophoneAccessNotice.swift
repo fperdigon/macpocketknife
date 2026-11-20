@@ -28,15 +28,20 @@ struct RecordingMicrophoneAccessNotice: View {
             if showsCaption {
                 Text("Microphone")
             }
-            Text(statusText)
-                .foregroundStyle(.secondary)
+            if access.permissionStatus == .allowed {
+                Label("Allowed", systemImage: "checkmark")
+                    .foregroundStyle(.secondary)
+            } else {
+                Text(access.permissionStatus.statusText)
+                    .foregroundStyle(.secondary)
+            }
             Spacer()
-            if access == .notDetermined {
-                Button("Allow microphone", action: requestAccess)
-                    .controlSize(.small)
-            } else if access.showsSettingsLink {
-                Button("Open Microphone settings", action: openSettings)
-                    .controlSize(.small)
+            if let title = access.permissionStatus.buttonTitle {
+                Button(title) {
+                    if access == .notDetermined { requestAccess() }
+                    else { openSettings() }
+                }
+                .controlSize(.small)
             }
         }
         .onAppear(perform: refreshAccess)
@@ -53,14 +58,6 @@ struct RecordingMicrophoneAccessNotice: View {
                 await Task.yield()
                 accessChanged()
             }
-        }
-    }
-
-    private var statusText: String {
-        switch access {
-        case .authorized: return "Allowed"
-        case .notDetermined: return "Not asked yet"
-        case .denied, .restricted, .unknown: return "Denied"
         }
     }
 

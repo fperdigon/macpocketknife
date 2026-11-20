@@ -27,12 +27,13 @@ public enum RecordingMicrophoneAccess: Equatable, Sendable {
         }
     }
 
-    public var showsSettingsLink: Bool {
+    public var permissionStatus: RecordingPermissionStatus {
         switch self {
-        case .denied, .restricted: return true
-        case .notDetermined, .authorized, .unknown: return false
+        case .authorized: return .allowed
+        case .notDetermined: return .microphoneNotAsked
+        case .denied, .restricted: return .microphoneDenied
+        case .unknown: return .unknown
         }
     }
 
-    public static let settingsURLString = PrivacyPane.microphone.settingsURLString
 }
