@@ -32,7 +32,8 @@ class BuildMetadataTests(unittest.TestCase):
         for directory in ("scripts", "Resources", "tools", "bin"):
             (self.tmp / directory).mkdir()
         for file in ("scripts/make-app-bundle.sh", "Resources/Info.plist", "Resources/AppIcon.icns",
-                     "Resources/MenuBarIcon.png", "Resources/MenuBarIcon@2x.png", "VERSION"):
+                     "Resources/MenuBarIcon.png", "Resources/MenuBarIcon@2x.png",
+                     "Resources/MacPocketKnife.entitlements", "VERSION"):
             shutil.copy(ROOT / file, self.tmp / file)
         (self.tmp / "bin/MacPocketKnife").write_text("fixture")
         self.tool("swift", '#!/bin/sh\ncase "$*" in *--show-bin-path*) echo "$FAKE_BIN" ;; esac\n')
