@@ -25,9 +25,29 @@ Run `sh scripts/run-quit-test.sh` after building to check that the normally laun
 app exits with status 0 within 15 seconds using the hidden `--quit-selftest` flag.
 CI also runs this check against the Xcode-built executable.
 
-Run `swift run MacPocketKnife --print-status` to print the current status line once and exit.
-Run `swift run MacPocketKnife --show-settings` to open Settings immediately after launch.
-Run `swift run MacPocketKnife --snapshot-settings <directory>` to save PNG snapshots of every Settings tab and exit.
+## Running a local build
+
+Launch the app from the repository root with:
+
+```sh
+scripts/run-local.sh
+```
+
+This uses the release build and bundle pipeline to create and launch
+`build/MacPocketKnife.app`, including its icons, Info.plist, and ad-hoc signature.
+It uses the `dev` build channel and the version from `VERSION`. Run
+`scripts/run-local.sh --no-launch` to build the bundle without quitting or
+launching an app.
+
+`swift run MacPocketKnife` launches a bare executable without the app bundle,
+Info.plist, or bundled icons, so it differs from the released app. Reserve the
+bare executable for CLI flags such as `--print-status` (print status and exit) or
+`--snapshot-settings <directory>` (save Settings tab PNGs and exit). To open
+Settings in the local app, use `open build/MacPocketKnife.app --args --show-settings`.
+
+The local bundle has the same bundle identifier as the release and runs from
+`build/`. Never copy it into `/Applications`: it would clash with the installed
+app's TCC permission grants and updater.
 
 ## macOS integration tests
 

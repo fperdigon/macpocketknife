@@ -90,7 +90,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         QuitSelfTest.trace("status item creation start")
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         QuitSelfTest.trace("status item creation done; image setup start")
-        if let image = NSImage(named: "MenuBarIcon") {
+        let menuBarImage = NSImage(named: "MenuBarIcon") ?? Bundle.main.resourceURL.flatMap {
+            NSImage(contentsOf: $0.appendingPathComponent("MenuBarIcon.png"))
+        }
+        if let image = menuBarImage {
             image.isTemplate = true
             image.size = NSSize(width: 18, height: 18)
             item.button?.image = image

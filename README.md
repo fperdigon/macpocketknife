@@ -119,7 +119,7 @@ dependencies. From the repository root:
 ```sh
 swift build
 swift test
-swift run MacPocketKnife
+scripts/run-local.sh
 ```
 
 The app runs in the menu bar without a Dock icon. Use its menu to quit.

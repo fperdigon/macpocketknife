@@ -11,3 +11,4 @@
 - All code and documentation are in English.
 - CI and release conventions follow the owner's `rmount` repository.
 - Coding tasks are delegated to Codex.
+Launch local builds only via scripts/run-local.sh so they match the released app.
