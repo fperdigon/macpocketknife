@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import Foundation
+@preconcurrency import Foundation
 
 public enum DictationFailure: Error, Sendable, Equatable {
     case permissionDenied, onDeviceUnavailable, microphoneUnavailable, recognitionFailed
@@ -67,6 +67,7 @@ public final class DictationController {
     private var generation = 0
     private var isFinishing = false
     private var finishTask: Task<Void, Never>?
+    private var startedAt: Date?
 
     public static func make(
         speech: any SpeechTranscribing, pasteboard: any PasteboardWriting,
@@ -111,6 +112,8 @@ public final class DictationController {
                 try await speech.start(locale: locale)
                 guard generation == session, !Task.isCancelled else { return }
                 state = .recording
+                startedAt = scheduler.now
+                AppLog.shared.info(category: "dictation", "Started language=\(locale.languageCode ?? "default")")
                 cancelDeadline = scheduler.schedule(at: scheduler.now.addingTimeInterval(600)) { [weak self] in
                     guard let self, self.generation == session else { return }
                     self.finish(copy: true)
@@ -146,6 +149,11 @@ public final class DictationController {
             }
             return
         }
+        if let startedAt {
+            let duration = max(0, scheduler.now.timeIntervalSince(startedAt))
+            AppLog.shared.info(category: "dictation", "Stopped durationSeconds=\(Int(duration)) wordCount=\(wordCount)")
+            self.startedAt = nil
+        }
         generation += 1
         isFinishing = false
         finishTask?.cancel()
@@ -166,10 +174,15 @@ public final class DictationController {
         let text = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         if !text.isEmpty { pasteboard.write(text) }
         let count = text.split(whereSeparator: { $0.isWhitespace }).count
+        AppLog.shared.info(category: "dictation", "Finalized wordCount=\(count)")
         send(NoticeComposer().composeDictation(wordCount: count))
     }
 
     private func fail(_ failure: DictationFailure) {
+        AppLog.shared.error(category: "dictation", "Failed code=\(failure)")
+        if failure == .permissionDenied {
+            AppLog.shared.warning(category: "permission", "Dictation access denied")
+        }
         finish(copy: false)
         state = failure == .onDeviceUnavailable ? .idle : .error
         lastError = failure.message

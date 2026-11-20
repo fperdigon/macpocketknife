@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import Darwin
-import Foundation
+@preconcurrency import Darwin
+@preconcurrency import Foundation
 
 @MainActor
 public final class AssistantEngine {
@@ -177,12 +177,14 @@ public final class AssistantEngine {
         for action in actions {
             guard !Task.isCancelled else { return }
             switch action {
-            case .terminate(let pid, let name, _):
+            case .terminate(let pid, let name, let reason):
+                AppLog.shared.info(category: "policy", "Terminate process=\(name) reason=\(reason)")
                 await notifier.deliver(Notice(
                     kind: .info, title: "Stopping keep-awake process",
                     body: "Stopping \(name) (PID \(pid))."
                 ))
                 let result = await terminator.terminate(pid: pid, expectedName: name)
+                AppLog.shared.info(category: "policy", "Termination result=\(result)")
                 switch result {
                 case .terminated:
                     removedPIDs.insert(pid)
@@ -200,13 +202,18 @@ public final class AssistantEngine {
                     ))
                 }
             case .releaseOwnAssertion:
+                AppLog.shared.info(category: "policy", "Release own assertions reason=batteryThreshold")
                 await notifier.deliver(Notice(
                     kind: .info, title: "Releasing keep-awake",
                     body: "Battery threshold reached. Releasing the app's sleep assertion."
                 ))
                 for controller in ownControllers { controller.deactivate() }
                 await notifier.deliver(composer.compose(action: action))
-            default:
+            case .notifyDetected:
+                AppLog.shared.info(category: "policy", "Detected keep-awake assertion")
+                await notifier.deliver(composer.compose(action: action))
+            case .notifyTerminationSkipped(_, let reason):
+                AppLog.shared.warning(category: "policy", "Termination skipped reason=\(reason)")
                 await notifier.deliver(composer.compose(action: action))
             }
         }

@@ -14,7 +14,7 @@
 
 import Foundation
 import Testing
-import MacPocketKnifeCore
+@testable import MacPocketKnifeCore
 
 @MainActor
 private final class InMemorySettingsStore: SettingsStore {
@@ -250,4 +250,18 @@ func appSettingsValidationHandlesNonfiniteDuration(duration: Double) {
     #expect(model.disconnectedRecordingDisplayName == nil)
     model.recordingTargetSelection = .display(uuid: display.uuid)
     #expect(model.settings.screenRecordingDisplayName == nil)
+}
+
+@Test func changedSettingKeysContainOnlySchemaNames() {
+    let previous = AppSettings()
+    var updated = previous
+    updated.telegram.chatID = "never-log-this-value"
+    updated.telegram.isEnabled = true
+    updated.alerts = AlertSettings(criticalBelowPercent: 11)
+    updated.screenRecordingFolder = "/Users/private/recordings"
+    #expect(updated.changedKeys(from: previous) == [
+        "alerts.criticalBelowPercent", "screenRecordingFolder", "telegram.chatID", "telegram.isEnabled"
+    ])
+    #expect(previous.changedKeys(from: updated) == updated.changedKeys(from: previous))
+    #expect(previous.changedKeys(from: previous).isEmpty)
 }

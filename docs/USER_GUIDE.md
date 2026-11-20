@@ -253,6 +253,20 @@ waits for exit and reopens the installed app, which restores the saved state and
 expiry. Checks use GitHub's public API; installation downloads only the chosen
 release asset. There is no telemetry. See [PRIVACY.md](PRIVACY.md).
 
+## Diagnostic logs
+
+Open **Settings > About > Logs > Open logs folder** to reveal daily logs in
+Finder. They are stored at `~/Library/Logs/MacPocketKnife` and kept for 30 local
+calendar days. They stay on this Mac and are never uploaded automatically.
+Logs record state changes, durations, counts, and error categories; dictation,
+recording content, Telegram message bodies, and credentials are excluded.
+
+For a bug report, reproduce the problem, open the relevant day's `.log` file,
+and check the complete file for private information before sharing it. Remove
+anything you do not want to disclose, then attach that checked copy to your
+report along with reproduction steps and the app version. You can also inspect
+entries in Console.app using subsystem `io.github.fperdigon.macpocketknife`.
+
 ## Privacy and removal
 
 There is no telemetry. Local operation needs no network. Optional Telegram

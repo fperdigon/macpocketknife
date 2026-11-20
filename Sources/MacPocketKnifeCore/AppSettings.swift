@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import Foundation
+@preconcurrency import Foundation
 
 public struct TelegramPreferences: Codable, Equatable, Sendable {
     public var isEnabled: Bool
@@ -143,5 +143,30 @@ public struct AppSettings: Codable, Equatable, Sendable {
         let folder = screenRecordingFolder.trimmingCharacters(in: .whitespacesAndNewlines)
         result.screenRecordingFolder = folder.isEmpty ? ScreenRecordingFiles.defaultFolder : NSString(string: folder).expandingTildeInPath
         return result
+    }
+}
+
+// Compare encoded settings so the log contains schema names only, including nested keys.
+extension AppSettings {
+    func changedKeys(from previous: AppSettings) -> [String] {
+        guard let before = try? JSONEncoder().encode(previous),
+              let after = try? JSONEncoder().encode(self),
+              let old = try? JSONSerialization.jsonObject(with: before) as? NSDictionary,
+              let new = try? JSONSerialization.jsonObject(with: after) as? NSDictionary else { return [] }
+        func changes(_ old: NSDictionary, _ new: NSDictionary, prefix: String) -> [String] {
+            let oldKeys = old.allKeys.compactMap { $0 as? String }
+            let newKeys = new.allKeys.compactMap { $0 as? String }
+            var changed: [String] = []
+            for key in Set(oldKeys + newKeys).sorted() {
+                let path = prefix + key
+                if let oldChild = old[key] as? NSDictionary, let newChild = new[key] as? NSDictionary {
+                    changed.append(contentsOf: changes(oldChild, newChild, prefix: path + "."))
+                } else if !((old[key] as? NSObject)?.isEqual(new[key]) ?? (new[key] == nil)) {
+                    changed.append(path)
+                }
+            }
+            return changed
+        }
+        return changes(old, new, prefix: "")
     }
 }

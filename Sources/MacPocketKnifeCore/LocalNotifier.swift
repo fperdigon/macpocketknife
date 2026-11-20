@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import Foundation
-import UserNotifications
+@preconcurrency import Foundation
+@preconcurrency import UserNotifications
 
 @MainActor
 public final class LocalNotifier: AlertNotifying {
@@ -52,6 +52,7 @@ public final class LocalNotifier: AlertNotifying {
 
     /// Delivery never prompts for permission. The setup flow requests it explicitly.
     public func deliver(_ notice: Notice) async {
+        AppLog.shared.info(category: "notice", "User notice kind=\(notice.kind.rawValue)")
         guard let center, await center.authorizationStatus() == .authorized else { return }
         let content = UNMutableNotificationContent()
         content.title = notice.title
@@ -66,6 +67,10 @@ public final class LocalNotifier: AlertNotifying {
             ? content.threadIdentifier : "\(content.threadIdentifier).\(UUID().uuidString)"
         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
         // Local delivery is best effort; denial or a center failure must not interrupt policy work.
-        try? await center.add(request)
+        do {
+            try await center.add(request)
+        } catch {
+            AppLog.shared.warning(category: "notice", "Delivery failed kind=\(notice.kind.rawValue) category=notificationCenter")
+        }
     }
 }

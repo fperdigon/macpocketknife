@@ -71,12 +71,15 @@ final class UpdateController: NSObject {
         do {
             switch try await checker.check(channel: prefs.channel, build: build) {
             case .upToDate(let current):
+                AppLog.shared.info(category: "update", "Check result=up-to-date tag=\(current)")
                 if userInitiated { Self.alert("You're up to date", "MacPocketKnife \(current) is current on the selected channel.") }
             case .available(let update):
+                AppLog.shared.info(category: "update", "Check result=available tag=\(update.release.tag)")
                 guard policy.shouldOffer(tag: update.release.tag, preferences: prefs, userInitiated: userInitiated) else { return }
                 await offer(update)
             }
         } catch {
+            AppLog.shared.warning(category: "update", "Check failed category=\(errorCategory(error))")
             if userInitiated { Self.alert("Could not check for updates", "The update check failed. Try again later.\n" + safeMessage(error)) }
         }
     }
@@ -97,6 +100,7 @@ final class UpdateController: NSObject {
     }
 
     private func install(_ update: AvailableUpdate) async {
+        AppLog.shared.info(category: "update", "Install started tag=\(update.release.tag)")
         showProgress("Downloading…")
         let work = FileManager.default.temporaryDirectory.appendingPathComponent("cam-update-" + UUID().uuidString)
         defer {
@@ -118,14 +122,41 @@ final class UpdateController: NSObject {
             let helper = UpdateInstaller.relaunchProcess(appURL: app)
             beforeQuit()
             try helper.run()
+            AppLog.shared.info(category: "update", "Relaunch scheduled tag=\(update.release.tag)")
             // Schedule before terminate(), which may enter a nested modal loop.
             // beforeQuit has already flushed the state needed by the replacement.
             let fallback = Timer(timeInterval: 5, repeats: false) { _ in exit(0) }
             RunLoop.main.add(fallback, forMode: .common)
             NSApp.terminate(nil)
         } catch {
+            AppLog.shared.error(category: "update", "Install failed tag=\(update.release.tag) category=\(errorCategory(error))")
             Self.alert("Update failed", safeMessage(error))
         }
+    }
+
+    private func errorCategory(_ error: any Error) -> String {
+        if let check = error as? UpdateChecker.CheckError {
+            switch check {
+            case .rateLimited: return "rate-limited"
+            case .http: return "http"
+            case .invalidResponse: return "invalid-response"
+            case .noRelease: return "no-release"
+            case .noAsset: return "no-asset"
+            }
+        }
+        if let install = error as? UpdateInstallError {
+            switch install {
+            case .downloadFailed: return "download"
+            case .checksumMismatch: return "checksum"
+            case .invalidDigest: return "digest"
+            case .invalidBundle: return "bundle"
+            case .signatureInvalid: return "signature"
+            case .operationFailed: return "file-operation"
+            }
+        }
+        if error is CancellationError { return "cancelled" }
+        if error is URLError { return "network" }
+        return "unexpected"
     }
 
     private func safeMessage(_ error: any Error) -> String {

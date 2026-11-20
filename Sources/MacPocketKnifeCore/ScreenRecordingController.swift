@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import Foundation
+@preconcurrency import Foundation
 
 @MainActor
 public final class ScreenRecordingController {
@@ -135,6 +135,14 @@ public final class ScreenRecordingController {
         stopRequested = false
         pendingFailure = nil
         state = .starting
+        let targetMode: String
+        switch target ?? settings.screenRecordingTarget {
+        case .mainDisplay: targetMode = "mainDisplay"
+        case .display: targetMode = "display"
+        case .allDisplays: targetMode = "allDisplays"
+        case .askEachTime: targetMode = "askEachTime"
+        }
+        AppLog.shared.info(category: "recording", "Start requested target=\(targetMode)")
         onChange?()
         operation = Task { [self] in
             do {
@@ -170,6 +178,7 @@ public final class ScreenRecordingController {
                         lastNotice = "The selected display is not connected. Recording the main display instead."
                     }
                 }
+                AppLog.shared.info(category: "recording", "Resolved target displayCount=\(selected.count)")
                 guard permission.requestAccessIfNeeded() else { throw ScreenRecordingFailure.permissionDenied }
                 let folder = URL(fileURLWithPath: settings.screenRecordingFolder, isDirectory: true)
                 do {
@@ -205,6 +214,7 @@ public final class ScreenRecordingController {
                         do {
                             let microphone = try await session.recorder.start(configuration: configuration,
                                 destination: destination, display: display, content: selectedContent)
+                            AppLog.shared.info(category: "recording", "Stream started microphone=\(microphone)")
                             if microphone != .unsupported || !reportedUnsupportedMicrophone {
                                 if let notice = microphone.notice, lastNotice?.contains(notice) != true {
                                     lastNotice = [lastNotice, notice].compactMap { $0 }.joined(separator: " ")
@@ -238,6 +248,7 @@ public final class ScreenRecordingController {
                 for session in sessions where session.ended { _ = session.stop() }
                 startedAt = scheduler.now
                 state = .recording
+                AppLog.shared.info(category: "recording", "Started displayCount=\(sessions.count)")
                 tick()
                 onChange?()
             } catch {
@@ -301,6 +312,8 @@ public final class ScreenRecordingController {
                                                                 interruptedDisplays: interruptedDisplays, notice: lastNotice)
             await notices.deliver(notice)
         }
+        let duration = startedAt.map { max(0, scheduler.now.timeIntervalSince($0)) } ?? 0
+        AppLog.shared.info(category: "recording", "Stopped durationSeconds=\(Int(duration)) fileCount=\(lastSavedFiles.count)")
         sessions = []
         startedAt = nil
         state = .idle
@@ -308,6 +321,12 @@ public final class ScreenRecordingController {
     }
 
     private func report(_ failure: ScreenRecordingFailure) {
+        AppLog.shared.error(category: "recording", "Failed code=\(failure)")
+        if failure == .permissionDenied {
+            AppLog.shared.warning(category: "permission", "Screen Recording denied")
+        } else if failure == .microphoneDenied {
+            AppLog.shared.warning(category: "permission", "Microphone denied for recording")
+        }
         if state == .idle || state == .error { state = .error }
         lastError = failure.message
         onChange?()

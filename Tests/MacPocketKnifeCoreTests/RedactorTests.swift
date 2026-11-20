@@ -54,3 +54,15 @@ func redactsAuthorizationCredentials(scheme: String) {
 func redactorPreservesNormalText(text: String) {
     #expect(Redactor.redact(text) == text)
 }
+
+@Test func redactsHomeDirectoryPathsWithoutMaskingOtherUserNames() {
+    let result = Redactor.redact(
+        "/Users/alice /Users/alice/Movies \"/Users/alice\" /Users/alice-other/Movies",
+        homeDirectory: "/Users/alice"
+    )
+    #expect(result == "~ ~/Movies \"~\" /Users/alice-other/Movies")
+    #expect(Redactor.redact("(/Users/alice),", homeDirectory: "/Users/alice") == "(~),")
+    #expect(Redactor.redact("/tmp/file", homeDirectory: "/") == "/tmp/file")
+    #expect(Redactor.redact("normal", homeDirectory: "") == "normal")
+    #expect(Redactor.redact("/Users/a.b/Movies", homeDirectory: "/Users/a.b") == "~/Movies")
+}

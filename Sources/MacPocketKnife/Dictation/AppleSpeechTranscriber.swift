@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import AVFoundation
-import Foundation
+@preconcurrency import AVFoundation
+@preconcurrency import Foundation
 import MacPocketKnifeCore
-import Speech
+@preconcurrency import Speech
 
 /// Audio buffers are handed directly to Apple's thread-safe recognition request.
 private final class AudioRequest: @unchecked Sendable {
@@ -58,11 +58,17 @@ final class AppleSpeechTranscriber: SpeechTranscribing {
         }
         try Task.checkCancellation()
         guard session == generation else { throw CancellationError() }
-        guard authorization == .authorized else { throw DictationFailure.permissionDenied }
+        guard authorization == .authorized else {
+            AppLog.shared.warning(category: "permission", "Speech recognition denied")
+            throw DictationFailure.permissionDenied
+        }
         let microphone = await AVCaptureDevice.requestAccess(for: .audio)
         try Task.checkCancellation()
         guard session == generation else { throw CancellationError() }
-        guard microphone else { throw DictationFailure.permissionDenied }
+        guard microphone else {
+            AppLog.shared.warning(category: "permission", "Microphone denied for dictation")
+            throw DictationFailure.permissionDenied
+        }
         guard recognizer.isAvailable else { throw DictationFailure.recognitionFailed }
         guard AVCaptureDevice.default(for: .audio) != nil else { throw DictationFailure.microphoneUnavailable }
 

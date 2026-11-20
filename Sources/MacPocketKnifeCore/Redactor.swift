@@ -12,13 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import Foundation
+@preconcurrency import Foundation
 
 /// Apply before logging or displaying error descriptions. Exact values are case-sensitive.
 public enum Redactor {
     public static let mask = "[REDACTED]"
 
-    public static func redact(_ text: String, secrets: [String] = []) -> String {
+    public static func redact(
+        _ text: String, secrets: [String] = [],
+        homeDirectory: String = FileManager.default.homeDirectoryForCurrentUser.path
+    ) -> String {
         let source = text as NSString
         let fullRange = NSRange(location: 0, length: source.length)
         let patterns = [
@@ -55,6 +58,13 @@ public enum Redactor {
         for range in merged.reversed() {
             result.replaceCharacters(in: range, with: mask)
         }
-        return result as String
+        let masked = result as String
+        guard !homeDirectory.isEmpty, homeDirectory != "/" else { return masked }
+        let escapedHome = NSRegularExpression.escapedPattern(for: homeDirectory)
+        guard let homePattern = try? NSRegularExpression(pattern: escapedHome + #"(?=/|$|[\s\"\x27(),:;\[\]{}<>])"#) else {
+            return mask
+        }
+        let maskedRange = NSRange(location: 0, length: (masked as NSString).length)
+        return homePattern.stringByReplacingMatches(in: masked, range: maskedRange, withTemplate: "~")
     }
 }

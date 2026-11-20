@@ -508,6 +508,17 @@ private struct AboutPane: View {
                     LabeledContent("Build SHA", value: build.sha)
                     LabeledContent("Channel", value: build.channel)
                     LabeledContent("License", value: "Apache-2.0")
+                    LabeledContent("Logs") {
+                        VStack(alignment: .trailing, spacing: 6) {
+                            Text("Daily log files, kept for 30 days, stored only on this Mac.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Button("Open logs folder") {
+                                try? AppLog.folder.createIfNeeded()
+                                NSWorkspace.shared.open(AppLog.folder.url)
+                            }
+                        }
+                    }
                     Link(
                         "fperdigon/macpocketknife",
                         destination: URL(string: "https://github.com/fperdigon/macpocketknife")!

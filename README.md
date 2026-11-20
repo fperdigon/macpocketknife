@@ -133,6 +133,8 @@ Telegram channel is the only intended network use. Its bot token belongs in the
 macOS Keychain; nonsecret preferences stay local. Machine-name inclusion is
 opt-in and disabled by default in the core formatter.
 
+Daily diagnostic logs stay on this Mac for 30 days; open them in **Settings > About > Logs**.
+
 See [privacy and removal details](docs/PRIVACY.md). Report vulnerabilities using
 the private process in [SECURITY.md](SECURITY.md).
 
