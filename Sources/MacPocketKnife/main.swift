@@ -126,13 +126,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         recordings.target = self
         menu.addItem(recordings)
         screenRecordingStatus.target = self
-        screenRecordingStatus.action = #selector(openScreenRecordingPrivacy)
+        screenRecordingStatus.action = #selector(openScreenRecordingStatusPrivacy)
         screenRecordingStatus.isHidden = true
         menu.addItem(screenRecordingStatus)
         dictationStatus.target = self
-        dictationStatus.action = #selector(openDictationPrivacy)
+        dictationStatus.action = #selector(openMicrophonePrivacy)
         dictationStatus.isHidden = true
         menu.addItem(dictationStatus)
+        let permissions = NSMenuItem(title: "Permissions", action: nil, keyEquivalent: "")
+        let permissionMenu = NSMenu(title: "Permissions")
+        permissionMenu.autoenablesItems = false
+        let screenPermission = NSMenuItem(
+            title: "Screen & System Audio Recording…", action: #selector(openScreenRecordingPrivacy), keyEquivalent: ""
+        )
+        screenPermission.target = self
+        permissionMenu.addItem(screenPermission)
+        let microphonePermission = NSMenuItem(
+            title: "Microphone…", action: #selector(openMicrophonePrivacy), keyEquivalent: ""
+        )
+        microphonePermission.target = self
+        permissionMenu.addItem(microphonePermission)
+        permissions.submenu = permissionMenu
+        menu.addItem(permissions)
         authorization.isEnabled = false
         menu.addItem(authorization)
         menu.addItem(.separator())
@@ -377,13 +392,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func openScreenRecordingPrivacy() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
-            NSWorkspace.shared.open(url)
-        }
+        openPrivacyPane(.screenRecording)
     }
 
-    @objc private func openDictationPrivacy() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy") {
+    @objc private func openMicrophonePrivacy() {
+        openPrivacyPane(.microphone)
+    }
+
+    @objc private func openScreenRecordingStatusPrivacy() {
+        let pane = screenRecording.lastFailure?.privacyPane ?? screenRecording.lastNoticePrivacyPane
+        openPrivacyPane(pane ?? .screenRecording)
+    }
+
+    private func openPrivacyPane(_ pane: PrivacyPane) {
+        if let url = URL(string: pane.settingsURLString) {
             NSWorkspace.shared.open(url)
         }
     }

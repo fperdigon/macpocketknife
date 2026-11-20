@@ -60,7 +60,6 @@ struct RecordingOptionsWindow: View {
             }
             Form {
                 Toggle("Include microphone", isOn: $model.settings.screenRecordingIncludesMicrophone)
-                RecordingMicrophoneAccessNotice(accessChanged: resize)
                 Text("Microphone capture requires macOS 15 or later.").font(.caption)
                 Toggle("Show cursor", isOn: $model.settings.screenRecordingShowsCursor)
                 Picker("Frame rate", selection: $model.settings.screenRecordingFrameRate) {
@@ -68,6 +67,7 @@ struct RecordingOptionsWindow: View {
                     Text("60 fps").tag(60)
                 }
             }
+            permissionsSection
             HStack {
                 Spacer()
                 Button("Cancel", action: cancel).keyboardShortcut(.cancelAction)
@@ -82,6 +82,26 @@ struct RecordingOptionsWindow: View {
         }
         .onChange(of: model.recordingTargetSelection) { _ in resize() }
         .onChange(of: thumbnails.polling.isDenied) { _ in resize() }
+    }
+
+    private var permissionsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Permissions").font(.headline)
+            HStack {
+                Text("Screen Recording")
+                Spacer()
+                Button("Open Screen Recording settings") {
+                    openSettings(.screenRecording)
+                }
+                .controlSize(.small)
+            }
+            RecordingMicrophoneAccessNotice(accessChanged: resize)
+        }
+    }
+
+    private func openSettings(_ pane: PrivacyPane) {
+        guard let url = URL(string: pane.settingsURLString) else { return }
+        NSWorkspace.shared.open(url)
     }
 
     private var previewCards: some View {

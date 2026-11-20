@@ -76,7 +76,8 @@ it never falls back to server recognition.
 The first use requests **Microphone** and **Speech Recognition** permissions.
 If denied, allow MacPocketKnife under **System Settings > Privacy & Security >
 Microphone / Speech Recognition**, then retry. Error guidance also appears in the
-menu and opens Privacy settings when clicked. A working default audio input is
+menu and opens Microphone settings when clicked. The menu's always-visible
+**Permissions > Microphone…** shortcut opens the same pane. A working default audio input is
 required; change it under **System Settings > Sound** if needed.
 
 Apple's Speech framework processes speech on device. MacPocketKnife does not save
@@ -101,6 +102,17 @@ window may prompt for it. If previews fail, polling stops and placeholders remai
 Click **Allow screen preview** to request access and open **System Settings >
 Privacy & Security > Screen Recording**. Previews retry when you return to the
 window or after a few seconds. macOS may ask again after an app update.
+
+The recording window always shows a **Permissions** section with **Screen
+Recording** and **Microphone** rows. **Open Screen Recording settings** opens
+the screen capture permission pane, and **Allow screen preview** still requests
+access when previews need it. The Microphone row shows **Allowed**, **Not asked
+yet**, or **Denied**. Choose **Allow microphone** to request access when it has
+not been requested, or **Open Microphone settings** when access is denied or
+restricted. Once allowed, no microphone permission button is shown. Status
+refreshes when the window appears, the app becomes active, or the window becomes
+key.
+
 Set **Include microphone**,
 **Show cursor**, and **Frame rate** (30 or 60 fps), then press **Start recording**.
 All-screens mode creates one video per screen. On macOS 14+, **Choose with system
@@ -146,9 +158,10 @@ AAC track so players hear both. Turn it off in **Settings > Tools > Screen recor
 Include microphone**. If microphone access is denied or
 the device cannot start, video and system audio still record; the menu status and
 saved notification explain the fallback. Allow access in **System Settings >
-Privacy & Security > Microphone** to include your voice. When access is denied or
-restricted, **Open Microphone settings** appears below **Include microphone** in
-the recording window and next to the toggle in **Settings > Tools**. macOS may
+Privacy & Security > Microphone** to include your voice. The recording window's
+**Permissions > Microphone** row is always visible, and **Open Microphone
+settings** remains available next to the toggle in **Settings > Tools** when
+access is denied or restricted. macOS may
 reset microphone permission after an app update; the status refreshes when you
 return to the app. On older macOS versions,
 recording continues without the microphone and shows the macOS 15 requirement
@@ -158,8 +171,14 @@ On first use, approve the macOS **Screen Recording** prompt. In **System Setting
 Privacy & Security > Screen & System Audio Recording**, enable MacPocketKnife
 (the pane may be called **Screen Recording** on older macOS versions). You may
 need to quit and relaunch the app after granting access, then start recording
-again. Permission guidance in the menu opens this pane. Microphone access is
-requested separately only if **Include microphone** is enabled.
+again. The menu always includes **Permissions > Screen & System Audio
+Recording…** and **Permissions > Microphone…**, each opening its own pane.
+Recording permission errors open the matching pane when clicked: screen access
+errors open Screen Recording settings and microphone access errors open
+Microphone settings. Microphone fallback guidance also opens Microphone settings.
+Starting a recording requests microphone access only if **Include microphone**
+is enabled; you can also request it explicitly with **Allow microphone** in the
+recording window.
 macOS may show a consent dialog for direct screen and audio access the first time
 you record (and periodically); it can appear in that recording.
 

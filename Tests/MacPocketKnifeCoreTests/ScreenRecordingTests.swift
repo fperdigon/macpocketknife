@@ -173,11 +173,13 @@ struct ScreenRecordingTests {
         #expect(f.recorder.starts == 0)
         #expect(f.controller.state == .error)
         #expect(f.controller.lastError == ScreenRecordingFailure.permissionDenied.message)
+        #expect(f.controller.lastFailure == .permissionDenied)
         #expect(f.dependencies.notices.last?.body.contains("Screen & System Audio Recording") == true)
         f.dependencies.allowed = true
         await f.start()
         #expect(f.controller.state == .recording)
         #expect(f.controller.lastError == nil)
+        #expect(f.controller.lastFailure == nil)
         await f.controller.stopAndWait()
     }
 
@@ -211,6 +213,7 @@ struct ScreenRecordingTests {
         await f.start()
         #expect(f.controller.state == .error)
         #expect(f.controller.lastError == failure.message)
+        #expect(f.controller.lastFailure == failure)
         #expect(f.recorder.stops == 1)
         #expect(f.controller.lastSavedFile == nil)
         #expect(f.dependencies.notices.count == 1)
@@ -509,6 +512,7 @@ struct ScreenRecordingTests {
             #expect(f.dependencies.notices.isEmpty)
             #expect(f.dependencies.folders.isEmpty)
             #expect(f.controller.lastError == nil)
+            #expect(f.controller.lastFailure == nil)
         case 1:
             #expect(f.recorder.content != nil)
             #expect(f.recorder.display == nil)
@@ -592,7 +596,10 @@ struct RecordingMicrophoneTests {
         await f.start()
         #expect(f.controller.state == .recording)
         #expect(f.controller.lastError == nil)
+        #expect(f.controller.lastFailure == nil)
         #expect(f.controller.lastNotice == outcome.notice)
+        let expectedPane: PrivacyPane? = outcome == .denied ? .microphone : nil
+        #expect(f.controller.lastNoticePrivacyPane == expectedPane)
         _ = await f.controller.stopAndWait()
         #expect(f.controller.lastSavedFile != nil)
         if let notice = outcome.notice {
@@ -600,6 +607,18 @@ struct RecordingMicrophoneTests {
         }
         await f.start()
         #expect(f.controller.lastNotice == (outcome == .unsupported ? nil : outcome.notice))
+        _ = await f.controller.stopAndWait()
+    }
+
+    @Test func successfulRetryClearsMicrophoneSettingsShortcut() async {
+        let f = ScreenFixture()
+        f.recorder.microphoneOutcome = .denied
+        await f.start()
+        #expect(f.controller.lastNoticePrivacyPane == .microphone)
+        _ = await f.controller.stopAndWait()
+        f.recorder.microphoneOutcome = .included
+        await f.start()
+        #expect(f.controller.lastNoticePrivacyPane == nil)
         _ = await f.controller.stopAndWait()
     }
 

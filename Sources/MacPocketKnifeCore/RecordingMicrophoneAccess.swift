@@ -34,5 +34,5 @@ public enum RecordingMicrophoneAccess: Equatable, Sendable {
         }
     }
 
-    public static let settingsURLString = "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
+    public static let settingsURLString = PrivacyPane.microphone.settingsURLString
 }
