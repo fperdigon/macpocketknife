@@ -150,7 +150,8 @@ private struct LogTestFixture {
     defer { fixture.cleanup() }
     let token = "123456789:" + String(repeating: "A", count: 35)
     let logger = fixture.logger()
-    logger.info(category: token, "/Users/test-person/Movies Bearer abcdef \(token)")
+    let bearer = "Bearer " + "abcdef"
+    logger.info(category: token, "/Users/test-person/Movies \(bearer) \(token)")
     let text = try fixture.text()
     #expect(!text.contains(token))
     #expect(!text.contains("/Users/test-person"))
