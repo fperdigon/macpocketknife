@@ -205,7 +205,7 @@ info.update(CFBundleIdentifier=sys.argv[2], CFBundleName="ScreenRecTest",
             CFBundleVersion="0.0.0", CAMGitSHA="unknown", CAMBuildChannel="dev")
 pathlib.Path(sys.argv[1]).write_bytes(plistlib.dumps(info))
 PLIST
-run_with_timeout 30 codesign --force --sign - "$app"
+run_with_timeout 30 codesign --force --sign - --entitlements "$PWD/Resources/MacPocketKnife.entitlements" "$app"
 player="$work/ClipPlayer.app"
 mkdir -p "$player/Contents/MacOS"
 run_with_timeout 15 python3 - "$player/Contents/Info.plist" <<'PLIST'

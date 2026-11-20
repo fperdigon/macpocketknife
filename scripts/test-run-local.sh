@@ -76,6 +76,8 @@ for architecture in arm64 x86_64; do
     lipo "$bundle/Contents/MacOS/MacPocketKnife" -verify_arch "$architecture"
 done
 codesign --verify --deep --strict "$bundle"
+entitlements=$(codesign -d --entitlements - --xml "$bundle" 2>&1)
+printf '%s\n' "$entitlements" | grep -Fq '<key>com.apple.security.device.audio-input</key>'
 signature=$(codesign --display --verbose=4 "$bundle" 2>&1)
 identifier=$(printf '%s\n' "$signature" | sed -n 's/^Identifier=//p')
 [ "$identifier" = "$direct_identifier" ]

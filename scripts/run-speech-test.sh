@@ -40,7 +40,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
 </dict></plist>
 PLIST
 swiftc scripts/speech/transcribe.swift -o "$app/Contents/MacOS/transcribe" || exit 1
-codesign --force --deep -s - "$app" || exit 1
+codesign --force --deep -s - --entitlements "$PWD/Resources/MacPocketKnife.entitlements" "$app" || exit 1
 
 # Runs the transcriber as its own app so the permission belongs to this bundle, not the
 # launching terminal. Output lands in $work/<name>.out; echoes the exit code.

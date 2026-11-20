@@ -39,6 +39,10 @@ It uses the `dev` build channel and the version from `VERSION`. Run
 `scripts/run-local.sh --no-launch` to build the bundle without quitting or
 launching an app.
 
+The shared bundle builder signs the app with
+`Resources/MacPocketKnife.entitlements`. Microphone access under the hardened
+runtime requires its `com.apple.security.device.audio-input` entitlement.
+
 `swift run MacPocketKnife` launches a bare executable without the app bundle,
 Info.plist, or bundled icons, so it differs from the released app. Reserve the
 bare executable for CLI flags such as `--print-status` (print status and exit) or

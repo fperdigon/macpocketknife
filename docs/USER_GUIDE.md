@@ -113,6 +113,12 @@ restricted. Once allowed, no microphone permission button is shown. Status
 refreshes when the window appears, the app becomes active, or the window becomes
 key.
 
+After an update, macOS may need its microphone permission reset. If access still
+fails, quit MacPocketKnife and run
+`tccutil reset Microphone io.github.fperdigon.macpocketknife` in Terminal. Reopen
+the app, choose **Allow microphone** in the recording window, and allow access
+in the macOS prompt.
+
 Set **Include microphone**,
 **Show cursor**, and **Frame rate** (30 or 60 fps), then press **Start recording**.
 All-screens mode creates one video per screen. On macOS 14+, **Choose with system
