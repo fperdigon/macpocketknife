@@ -24,14 +24,17 @@ struct RecordingMicrophoneAccessNotice: View {
     @State private var access = RecordingMicrophoneAccessNotice.currentAccess()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if access.showsSettingsLink {
-                if showsCaption {
-                    Text("Microphone access is denied, so recordings will have no voice. macOS may reset this after an app update.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+        HStack {
+            if showsCaption {
+                Text("Microphone")
+            }
+            Text(statusText)
+                .foregroundStyle(.secondary)
+            Spacer()
+            if access == .notDetermined {
+                Button("Allow microphone", action: requestAccess)
+                    .controlSize(.small)
+            } else if access.showsSettingsLink {
                 Button("Open Microphone settings", action: openSettings)
                     .controlSize(.small)
             }
@@ -53,6 +56,21 @@ struct RecordingMicrophoneAccessNotice: View {
         }
     }
 
+    private var statusText: String {
+        switch access {
+        case .authorized: return "Allowed"
+        case .notDetermined: return "Not asked yet"
+        case .denied, .restricted, .unknown: return "Denied"
+        }
+    }
+
+    private func requestAccess() {
+        Task { @MainActor in
+            _ = await AVCaptureDevice.requestAccess(for: .audio)
+            refreshAccess()
+        }
+    }
+
     private static func currentAccess() -> RecordingMicrophoneAccess {
         let status = AVCaptureDevice.authorizationStatus(for: .audio)
         return RecordingMicrophoneAccess(authorizationStatusRawValue: status.rawValue)
@@ -63,7 +81,7 @@ struct RecordingMicrophoneAccessNotice: View {
     }
 
     private func openSettings() {
-        guard let url = URL(string: RecordingMicrophoneAccess.settingsURLString) else { return }
+        guard let url = URL(string: PrivacyPane.microphone.settingsURLString) else { return }
         NSWorkspace.shared.open(url)
     }
 }
