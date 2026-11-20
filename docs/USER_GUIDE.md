@@ -113,7 +113,9 @@ restricted. Once allowed, no microphone permission button is shown. Status
 refreshes when the window appears, the app becomes active, or the window becomes
 key.
 
-After an update, macOS may need its microphone permission reset. If access still
+After an update, the app resets its old permission entries automatically when
+**Reset permissions after updates** is enabled in **Settings > General**.
+Re-allow access in **Record screen… > Permissions**. If microphone access still
 fails, quit MacPocketKnife and run
 `tccutil reset Microphone io.github.fperdigon.macpocketknife` in Terminal. Reopen
 the app, choose **Allow microphone** in the recording window, and allow access
@@ -315,3 +317,16 @@ To remove everything:
 4. Revoke the token through BotFather if it should no longer work. Remove the bot
    and Telegram conversation separately if desired; deleting local data does not
    erase messages already delivered to Telegram.
+
+## Permissions after updates
+
+Ad-hoc signed updates can invalidate macOS permission grants. **Settings > General >
+Reset permissions after updates** is on by default. On the first launch, and whenever
+the main executable's SHA-256 changes (including nightlies with the same version),
+the app uses the system `/usr/bin/tccutil` tool to reset only its own
+`io.github.fperdigon.macpocketknife` entries for Microphone, ScreenCapture, and
+SpeechRecognition. It never resets another app's entries or all apps' permissions.
+Re-allow Screen Recording and Microphone in **Record screen… > Permissions**;
+dictation requests Speech Recognition again on use. A local notice appears if
+notifications are authorized and at least one reset succeeds. Turn the setting off
+to keep existing entries. Resets do not grant access or read capture content.

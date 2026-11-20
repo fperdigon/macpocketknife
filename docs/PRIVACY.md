@@ -14,7 +14,8 @@ Enable offline dictation for the language in System Settings > Keyboard > Dictat
 Apple's Speech framework performs the processing on device. The app sends no audio
 or transcript anywhere, including to Telegram.
 
-Microphone and speech-recognition permission prompts appear only on first use.
+Microphone and speech-recognition permission prompts appear on first use and may
+appear again after an update resets this app's entries (see below).
 Permissions can be managed in System Settings > Privacy & Security. The global
 shortcut uses Carbon hotkey registration and needs no Accessibility permission.
 
@@ -164,3 +165,16 @@ Run `swift test` for the core tests. The Keychain integration test uses a unique
 random service and deletes its item afterward; it is skipped whenever the `CI`
 environment variable is set. All other secret store and redactor tests use
 in-memory data and require no hardware, network, or real clock.
+
+## Permissions after updates
+
+Ad-hoc signed updates can invalidate macOS permission grants. **Settings > General >
+Reset permissions after updates** is on by default. On the first launch, and whenever
+the main executable's SHA-256 changes (including nightlies with the same version),
+the app uses the system `/usr/bin/tccutil` tool to reset only its own
+`io.github.fperdigon.macpocketknife` entries for Microphone, ScreenCapture, and
+SpeechRecognition. It never resets another app's entries or all apps' permissions.
+Re-allow Screen Recording and Microphone in **Record screen… > Permissions**;
+dictation requests Speech Recognition again on use. A local notice appears if
+notifications are authorized and at least one reset succeeds. Turn the setting off
+to keep existing entries. Resets do not grant access or read capture content.

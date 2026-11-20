@@ -74,6 +74,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let authorization = NSMenuItem(title: "Notifications: checking…", action: nil, keyEquivalent: "")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let enabled = settings.settings.resetPermissionsAfterUpdates
+        let channel = BuildInfo.current.channel
+        let skipReset = QuitSelfTest.isRequested
+        Task { @MainActor [self] in
+            let didReset = await Task.detached(priority: .userInitiated) {
+                guard !skipReset,
+                      Bundle.main.bundleIdentifier == PermissionResetAfterUpdate.bundleIdentifier else { return false }
+                return PermissionResetAfterUpdate().run(enabled: enabled, channel: channel)
+            }.value
+            guard !isTerminating else { return }
+            finishLaunching(didResetPermissions: didReset)
+        }
+    }
+
+    private func finishLaunching(didResetPermissions: Bool) {
         if QuitSelfTest.isRequested {
             print("quit-selftest: applicationDidFinishLaunching")
             fflush(stdout)
@@ -219,6 +234,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             QuitSelfTest.trace("engine.start done; notification authorization start")
             // The system authorization state persists across launches.
             updateAuthorization(await localNotifier.requestAuthorizationIfNeeded())
+            if didResetPermissions {
+                await localNotifier.deliver(NoticeComposer().composePermissionResetAfterUpdate())
+            }
             QuitSelfTest.trace("notification authorization done")
         }
         QuitSelfTest.trace("engine start task created")

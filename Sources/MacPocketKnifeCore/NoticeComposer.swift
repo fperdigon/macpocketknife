@@ -47,6 +47,11 @@ public struct NoticeComposer: NoticeComposing {
         )
     }
 
+    public func composePermissionResetAfterUpdate() -> Notice {
+        Notice(kind: .info, title: "Permissions after update",
+               body: "MacPocketKnife was updated. Re-allow Screen Recording and Microphone in Record screen… › Permissions.")
+    }
+
     /// Keep recognized text out of notifications and their persistent history.
     public func composeDictation(wordCount: Int) -> Notice {
         if wordCount == 0 {
