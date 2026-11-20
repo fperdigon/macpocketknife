@@ -67,7 +67,9 @@ verify_one() (
         lipo "$exe" -verify_arch "$architecture" || fail "missing $architecture architecture"
     done
     codesign --verify --deep --strict "$app" || fail 'invalid code signature'
-    echo 'PASS: bundle structure, universal executable and whole-bundle signature'
+    entitlements=$(codesign -d --entitlements - --xml "$app" 2>&1) || fail 'could not read code signature entitlements'
+    printf '%s\n' "$entitlements" | grep -Fq '<key>com.apple.security.device.audio-input</key>' || fail 'missing microphone entitlement'
+    echo 'PASS: bundle structure, universal executable, whole-bundle signature and microphone entitlement'
 )
 failures=0
 for dmg in "$@"; do

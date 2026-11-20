@@ -47,12 +47,15 @@ chmod 755 "$bundle/Contents/MacOS/MacPocketKnife"
 sed -e "s/@VERSION@/$version/g" -e "s/@GIT_SHA@/$build_sha/g" \
     -e "s/@BUILD_CHANNEL@/$build_channel/g" Resources/Info.plist > "$bundle/Contents/Info.plist"
 plutil -lint "$bundle/Contents/Info.plist" >&2
+plutil -lint "$root/Resources/MacPocketKnife.entitlements" >&2
 
 identity=${SIGN_IDENTITY:--}
 if [ "$identity" = '-' ]; then
-    codesign --force --sign - --options runtime "$bundle" >&2
+    codesign --force --sign - --options runtime \
+        --entitlements "$root/Resources/MacPocketKnife.entitlements" "$bundle" >&2
 else
-    codesign --force --sign "$identity" --options runtime --timestamp "$bundle" >&2
+    codesign --force --sign "$identity" --options runtime --timestamp \
+        --entitlements "$root/Resources/MacPocketKnife.entitlements" "$bundle" >&2
 fi
 codesign --verify --deep --strict "$bundle" >&2
 printf '%s\n' "$bundle"

@@ -22,6 +22,7 @@ import tempfile
 import unittest
 
 SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "verify-dmg.sh"
+ENTITLEMENTS = SCRIPT.parent.parent / "Resources/MacPocketKnife.entitlements"
 
 
 class VerifyDmgTests(unittest.TestCase):
@@ -71,8 +72,29 @@ printf '%s\\n' "$*" >> "$CALL_LOG"
 """)
         self.tool("codesign", """#!/bin/bash
 printf '%s\\n' "$*" >> "$CALL_LOG"
+for app; do :; done
+case "$1" in
+  --force)
+    mkdir -p "$app/Contents/_CodeSignature"
+    if [ "$4" = --entitlements ]; then
+      cp "$5" "$app/Contents/_CodeSignature/entitlements.plist"
+    else
+      rm -f "$app/Contents/_CodeSignature/entitlements.plist"
+    fi
+    exit 0 ;;
+  -d)
+    [ ! -f "$app/Contents/_CodeSignature/entitlements.plist" ] ||
+      cat "$app/Contents/_CodeSignature/entitlements.plist" ;;
+esac
 [ "${BAD_SIGNATURE:-0}" = 0 ]
 """)
+        self.sign_fixture(ENTITLEMENTS)
+
+    def sign_fixture(self, entitlements=None):
+        command = ["codesign", "--force", "--sign", "-"]
+        if entitlements is not None:
+            command.extend(["--entitlements", str(entitlements)])
+        subprocess.run(command + [str(self.app)], env=self.env, check=True)
 
     def tool(self, name, text):
         target = self.tools / name
@@ -82,10 +104,12 @@ printf '%s\\n' "$*" >> "$CALL_LOG"
     def save_plist(self):
         self.plist.write_bytes(plistlib.dumps(self.info))
 
-    def verify(self, expected=0, **env):
+    def verify(self, expected=0, expected_error=None, **env):
         result = subprocess.run(["bash", str(SCRIPT), str(self.dmg)],
                                 env=dict(self.env, **env), capture_output=True, text=True)
         self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+        if expected_error is not None:
+            self.assertIn(expected_error, result.stderr)
         return self.log.read_text()
 
     def test_valid_bundle_and_readonly_mount(self):
@@ -94,7 +118,13 @@ printf '%s\\n' "$*" >> "$CALL_LOG"
         self.assertIn("-verify_arch arm64", log)
         self.assertIn("-verify_arch x86_64", log)
         self.assertIn("--verify --deep --strict", log)
+        self.assertIn("-d --entitlements - --xml", log)
         self.assertIn("detach", log)
+
+    def test_missing_microphone_entitlement_unmounts(self):
+        self.sign_fixture()
+        self.assertIn("detach", self.verify(
+            1, expected_error="missing microphone entitlement"))
 
     def test_bad_signature_unmounts(self):
         self.assertIn("detach", self.verify(1, BAD_SIGNATURE="1"))
