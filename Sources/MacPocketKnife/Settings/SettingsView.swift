@@ -258,7 +258,10 @@ private struct ToolsPane: View {
             }
             Toggle("Show cursor", isOn: $model.settings.screenRecordingShowsCursor)
             if #available(macOS 15.0, *) {
-                Toggle("Include microphone (mixed into the same audio track)", isOn: $model.settings.screenRecordingIncludesMicrophone)
+                HStack {
+                    Toggle("Include microphone (mixed into the same audio track)", isOn: $model.settings.screenRecordingIncludesMicrophone)
+                    RecordingMicrophoneAccessNotice(showsCaption: false)
+                }
             } else {
                 Text("Include microphone requires macOS 15 or later.").font(.caption)
             }

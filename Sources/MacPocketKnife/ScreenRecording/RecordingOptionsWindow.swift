@@ -60,6 +60,7 @@ struct RecordingOptionsWindow: View {
             }
             Form {
                 Toggle("Include microphone", isOn: $model.settings.screenRecordingIncludesMicrophone)
+                RecordingMicrophoneAccessNotice(accessChanged: resize)
                 Text("Microphone capture requires macOS 15 or later.").font(.caption)
                 Toggle("Show cursor", isOn: $model.settings.screenRecordingShowsCursor)
                 Picker("Frame rate", selection: $model.settings.screenRecordingFrameRate) {

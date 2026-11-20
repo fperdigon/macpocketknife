@@ -146,7 +146,11 @@ AAC track so players hear both. Turn it off in **Settings > Tools > Screen recor
 Include microphone**. If microphone access is denied or
 the device cannot start, video and system audio still record; the menu status and
 saved notification explain the fallback. Allow access in **System Settings >
-Privacy & Security > Microphone** to include your voice. On older macOS versions,
+Privacy & Security > Microphone** to include your voice. When access is denied or
+restricted, **Open Microphone settings** appears below **Include microphone** in
+the recording window and next to the toggle in **Settings > Tools**. macOS may
+reset microphone permission after an app update; the status refreshes when you
+return to the app. On older macOS versions,
 recording continues without the microphone and shows the macOS 15 requirement
 once per app session.
 
