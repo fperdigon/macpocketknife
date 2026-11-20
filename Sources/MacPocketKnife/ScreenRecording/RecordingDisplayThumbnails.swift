@@ -44,6 +44,7 @@ final class RecordingDisplayThumbnails: ObservableObject {
         guard polling.isActive, polling.isDenied else { return }
         retry?.cancel()
         retry = nil
+        AppLog.shared.info(category: "recording-preview", "Preview capture resumed")
         polling.resume()
         startTimer()
     }
@@ -88,7 +89,11 @@ final class RecordingDisplayThumbnails: ObservableObject {
                 self.captures[uuid] = nil
                 guard !Task.isCancelled, self.generation == currentGeneration else { return }
                 if let image { self.images[uuid] = image }
+                let wasDenied = self.polling.isDenied
                 self.polling.complete(uuid, succeeded: image != nil)
+                if self.polling.isDenied && !wasDenied {
+                    AppLog.shared.warning(category: "recording-preview", "Preview capture denied or unavailable; polling paused")
+                }
                 if self.polling.isDenied {
                     self.timer?.cancel()
                     self.timer = nil

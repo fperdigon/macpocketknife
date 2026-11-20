@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import Foundation
+@preconcurrency import Foundation
 
 public enum TelegramError: Error, Sendable, Equatable, LocalizedError, CustomStringConvertible {
     case invalidToken
@@ -104,9 +104,26 @@ public struct TelegramClient: TelegramServing {
     }
 
     public func sendMessage(chatID: Int64, text: String, silent: Bool = false) async throws {
-        let _: TelegramMessage = try await call(
-            "sendMessage", body: MessageBody(chatID: chatID, text: text, disableNotification: silent)
-        )
+        do {
+            let _: TelegramMessage = try await call(
+                "sendMessage", body: MessageBody(chatID: chatID, text: text, disableNotification: silent)
+            )
+            AppLog.shared.info(category: "telegram", "Send succeeded status=ok")
+        } catch {
+            // TelegramError contains safe categories; never inspect arbitrary error descriptions.
+            let status: String
+            switch error {
+            case TelegramError.invalidToken: status = "invalidToken"
+            case TelegramError.rateLimited: status = "rateLimited"
+            case TelegramError.network: status = "network"
+            case TelegramError.malformedResponse: status = "malformedResponse"
+            case TelegramError.apiFailure: status = "apiFailure"
+            case is CancellationError: status = "cancelled"
+            default: status = "unknown"
+            }
+            AppLog.shared.warning(category: "telegram", "Send failed status=\(status)")
+            throw error
+        }
     }
 
     private struct EmptyBody: Encodable {}

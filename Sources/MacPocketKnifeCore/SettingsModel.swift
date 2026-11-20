@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import Combine
-import Foundation
-import ServiceManagement
+@preconcurrency import Combine
+@preconcurrency import Foundation
+@preconcurrency import ServiceManagement
 
 public enum SettingsSetupError: Error, Sendable, Equatable, LocalizedError {
     case telegramDisabled
@@ -36,6 +36,10 @@ public final class SettingsModel: ObservableObject {
         didSet {
             let validated = settings.validated()
             if settings != validated { settings = validated }
+            let changed = settings.changedKeys(from: oldValue)
+            if !changed.isEmpty {
+                AppLog.shared.info(category: "settings", "Changed keys: \(changed.joined(separator: ", "))")
+            }
             store.save(settings)
         }
     }

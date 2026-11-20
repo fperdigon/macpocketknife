@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import Foundation
+@preconcurrency import Foundation
 
 @MainActor
 public final class CaffeinateController {
@@ -84,7 +84,10 @@ public final class CaffeinateController {
         let wasActive = isActive
         assertion = nil
         store.save(nil)
-        if wasActive { onChange?(false) }
+        if wasActive {
+            AppLog.shared.info(category: "power", "\(kind == .displaySleep ? "Keep-unlocked" : "Keep-awake") off")
+            onChange?(false)
+        }
     }
 
     public func toggle() {
@@ -107,6 +110,7 @@ public final class CaffeinateController {
 
     private func start(expiringAt date: Date?) {
         guard let handle = holder.create(name: name, kind: kind) else {
+            AppLog.shared.warning(category: "power", "Sleep assertion activation failed")
             store.save(nil)
             return
         }
@@ -121,6 +125,7 @@ public final class CaffeinateController {
                 self.deactivate()
             }
         }
+        AppLog.shared.info(category: "power", "\(kind == .displaySleep ? "Keep-unlocked" : "Keep-awake") on")
         onChange?(true)
     }
 

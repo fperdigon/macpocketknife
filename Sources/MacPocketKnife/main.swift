@@ -239,6 +239,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        AppLog.shared.info(category: "app", "Quit")
         dictation.discard()
         hotkey.shutdown()
         engine?.stop()
@@ -421,6 +422,17 @@ if CommandLine.arguments.contains("--print-status") {
     if let line = StatusLineFormatter.blockersLine(blockers: blockers) { print(line) }
     exit(0)
 }
+
+let build = BuildInfo.current
+#if arch(arm64)
+let architecture = "arm64"
+#elseif arch(x86_64)
+let architecture = "x86_64"
+#else
+let architecture = "unknown"
+#endif
+let system = ProcessInfo.processInfo.operatingSystemVersionString
+AppLog.shared.info(category: "app", "Launch version=\(build.version) channel=\(build.channel) macOS=\(system) architecture=\(architecture)")
 
 let application = NSApplication.shared
 let appDelegate = AppDelegate()

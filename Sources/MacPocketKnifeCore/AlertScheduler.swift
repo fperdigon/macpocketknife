@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import Foundation
+@preconcurrency import Foundation
 
 public struct AlertScheduler: AlertScheduling {
     public var settings: AlertSettings
@@ -31,6 +31,9 @@ public struct AlertScheduler: AlertScheduling {
     ) -> BatteryAlert? {
         guard power.source == .battery, blockerActive,
               let percent = power.batteryPercent else {
+            if previousLevel != nil {
+                AppLog.shared.info(category: "battery", "Alert level reset reason=ineligible")
+            }
             previousLevel = nil
             lastAlertTime = nil
             return nil
@@ -49,6 +52,9 @@ public struct AlertScheduler: AlertScheduling {
             interval = settings.normalInterval
         }
 
+        if previousLevel != level {
+            AppLog.shared.info(category: "battery", "Alert level changed level=\(level)")
+        }
         let escalated = previousLevel.map { level > $0 } ?? false
         previousLevel = level
         if let lastAlertTime, !escalated,

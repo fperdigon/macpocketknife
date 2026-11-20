@@ -156,6 +156,22 @@ Do not commit personal data, identifiers, hostnames, local filesystem locations,
 bot tokens, or other secrets, including in fixtures, logs, and screenshots.
 Use neutral synthetic examples. Never allowlist a real credential.
 
+## Diagnostic logging
+
+Use `AppLog.shared.info(category: "recording", "Recording stopped file-count=2")`
+(or `debug`, `warning`, `error`) for metadata-only diagnostic events. Keep
+categories stable and log state changes, durations, counts, and fixed error
+categories. Never log dictation text, transcripts, audio, recording content,
+Telegram message bodies, bot tokens, chat IDs, Keychain values, process arguments,
+or arbitrary error descriptions. Log changed setting key names, never values.
+All entries pass through `Redactor`; redaction does not make content logging safe.
+
+For a local app smoke test, set `MACPOCKETKNIFE_LOG_DIR` to a temporary directory.
+Core logger tests inject a directory, file system, and clock; never point tests at
+`~/Library`. The normal location is `~/Library/Logs/MacPocketKnife`; log files are
+kept for 30 local calendar days, with daily size caps. Review and remove private
+information before attaching logs to issues.
+
 ## Reporting issues
 
 Open a GitHub issue with a short description, expected and actual behavior,

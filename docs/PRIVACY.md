@@ -60,6 +60,32 @@ choose until you delete them; removing the app does not remove recordings.
 A folder managed by an external sync service may sync files under that service's
 settings. Choose a local folder if you do not want such syncing.
 
+## Local diagnostic logs
+
+Daily diagnostic files are stored only on this Mac in
+`~/Library/Logs/MacPocketKnife/macpocketknife-YYYY-MM-DD.log`.
+Open them from **Settings > About > Logs > Open logs folder**. The app never
+uploads logs, including to Telegram. Each log is also mirrored to the macOS
+unified log for Console.app, under subsystem `io.github.fperdigon.macpocketknife`;
+macOS manages the unified log's retention separately.
+
+Logs contain metadata: app version, build channel, macOS version, architecture,
+launch and quit, changed setting names, update results and error categories,
+keep-awake and protection actions, process names, battery alert levels, recording
+and dictation state, durations and counts, language, permission outcomes, and
+Telegram delivery status categories. Logs never contain dictation text,
+transcripts, audio, screen or recording content, Telegram message bodies, bot
+tokens, chat IDs, or Keychain values. Home-directory paths are replaced with `~`,
+and token patterns and authorization credentials are redacted as a safeguard.
+
+The app keeps the current day and preceding 29 local calendar days, pruning
+older matching log files at launch and when the day changes. Other files are
+left alone. Debug and info file logging stops at about 10 MB per day with one
+size-cap warning; warnings and errors can continue up to 20 MB. The folder uses
+owner-only permissions (0700), and log files use 0600. If logs cannot be written,
+the app continues silently. Uninstalling the app does not remove its logs;
+delete the folder to remove them immediately.
+
 ## Local storage
 
 The Telegram bot token belongs only in the macOS Keychain, as a generic-password
@@ -73,12 +99,11 @@ are stored locally in the app's UserDefaults domain. Alert thresholds and
 notification choices are preferences, not secrets. Treat the Telegram chat ID
 as private routing information; never put it in source code or logs.
 
-The secret store and redactor are core building blocks. This issue does not
-add Telegram networking or settings controls to the menu bar app.
-Callers must pass known secret values to `Redactor.redact(_:secrets:)` before
-logging or displaying errors that might contain them. It also masks Telegram
-bot token patterns and credentials using the `Bearer` authorization scheme.
-Redaction is a safeguard, not a reason to log request bodies or credentials.
+Use `AppLog` for diagnostic logging; it redacts every entry before writing.
+Callers must still exclude secrets and content entirely, and pass known secret
+values to `Redactor.redact(_:secrets:)` before displaying errors that might
+contain them. Redaction is a safeguard, not a reason to log request bodies or
+credentials.
 
 ## Network access and messages
 

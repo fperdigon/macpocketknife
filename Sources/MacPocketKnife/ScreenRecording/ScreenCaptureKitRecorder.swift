@@ -332,7 +332,10 @@ final class ScreenCaptureKitRecorder: ScreenRecording {
         if configuration.includesMicrophone {
             if #available(macOS 15.0, *) {
                 let allowed = await AVCaptureDevice.requestAccess(for: .audio)
-                if !allowed { outcome = .denied }
+                if !allowed {
+                    AppLog.shared.warning(category: "permission", "Microphone denied for recording")
+                    outcome = .denied
+                }
                 else { outcome = AVCaptureDevice.default(for: .audio) == nil ? .unavailable : .included }
             } else { outcome = .unsupported }
         }
