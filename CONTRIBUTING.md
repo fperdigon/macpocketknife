@@ -205,3 +205,25 @@ Report security vulnerabilities privately as described in [SECURITY.md](SECURITY
 
 Contributions are licensed under Apache-2.0; preserve [LICENSE](LICENSE),
 [NOTICE](NOTICE), and source headers.
+
+## Permissions after updates
+
+Ad-hoc signed updates can invalidate macOS permission grants. **Settings > General >
+Reset permissions after updates** is on by default. On the first launch, and whenever
+the main executable's SHA-256 changes (including nightlies with the same version),
+the app uses the system `/usr/bin/tccutil` tool to reset only its own
+`io.github.fperdigon.macpocketknife` entries for Microphone, ScreenCapture, and
+SpeechRecognition. It never resets another app's entries or all apps' permissions.
+Re-allow Screen Recording and Microphone in **Record screen… > Permissions**;
+dictation requests Speech Recognition again on use. A local notice appears if
+notifications are authorized and at least one reset succeeds. Turn the setting off
+to keep existing entries. Resets do not grant access or read capture content.
+
+The launch check finishes on a background task before capture UI and hotkeys are
+created. The `dev` channel, tests, and CI skip it without updating the stored
+`lastPermissionResetBuildID`. All three reset commands are attempted with a
+10-second timeout each; failures log service names only and still record the build
+to avoid retrying every launch. Hash failures leave the saved ID unchanged.
+Test this flow only with injected process/storage fakes; never run the real product
+reset or launch the installed app for verification. Run
+`CI=1 swift test --disable-sandbox --enable-code-coverage` for coverage.

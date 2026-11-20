@@ -143,6 +143,19 @@ the private process in [SECURITY.md](SECURITY.md).
 Apache-2.0. Copyright 2026 Francisco Perdigon Romero and contributors.
 See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
+## Permissions after updates
+
+Ad-hoc signed updates can invalidate macOS permission grants. **Settings > General >
+Reset permissions after updates** is on by default. On the first launch, and whenever
+the main executable's SHA-256 changes (including nightlies with the same version),
+the app uses the system `/usr/bin/tccutil` tool to reset only its own
+`io.github.fperdigon.macpocketknife` entries for Microphone, ScreenCapture, and
+SpeechRecognition. It never resets another app's entries or all apps' permissions.
+Re-allow Screen Recording and Microphone in **Record screen… > Permissions**;
+dictation requests Speech Recognition again on use. A local notice appears if
+notifications are authorized and at least one reset succeeds. Turn the setting off
+to keep existing entries. Resets do not grant access or read capture content.
+
 ## About the author
 
 Created by Francisco Perdigon Romero (https://github.com/fperdigon), founder of Core AI (https://core-ai.net), a company specializing in privacy-focused enterprise AI solutions.

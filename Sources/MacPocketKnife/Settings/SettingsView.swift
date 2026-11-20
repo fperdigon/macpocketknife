@@ -174,6 +174,9 @@ private struct GeneralPane: View {
                 ), format: .number)
             }
             Toggle("Launch at login", isOn: $model.launchAtLogin)
+            Toggle("Reset permissions after updates", isOn: $model.settings.resetPermissionsAfterUpdates)
+            Text("macOS forgets this app's permissions after each update. When on, the app clears its old entries so macOS asks again.")
+                .font(.caption)
             Text("Local notifications are always enabled.")
                 .font(.caption)
         }

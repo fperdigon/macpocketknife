@@ -37,6 +37,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var policy: PolicySettings
     public var keepAwakeDefaultDuration: TimeInterval?
     public var telegram: TelegramPreferences
+    public var resetPermissionsAfterUpdates = true
     public var launchAtLogin: Bool
     public var showOtherSleepBlockers: Bool
     public var updateChannel: UpdateChannel
@@ -83,6 +84,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         case screenRecordingHotkeyEnabled, screenRecordingHotkeyKey, screenRecordingFrameRate
         case screenRecordingShowsCursor, screenRecordingIncludesMicrophone, screenRecordingFolder
         case dictationHotkeyEnabled, dictationHotkeyKey, dictationLanguage
+        case resetPermissionsAfterUpdates
         case alerts, policy, keepAwakeDefaultDuration, telegram, launchAtLogin
         case updateChannel, checkForUpdatesAutomatically, skippedVersion, showOtherSleepBlockers
     }
@@ -94,6 +96,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         policy = try container.decode(PolicySettings.self, forKey: .policy)
         keepAwakeDefaultDuration = try container.decodeIfPresent(TimeInterval.self, forKey: .keepAwakeDefaultDuration)
         telegram = try container.decode(TelegramPreferences.self, forKey: .telegram)
+        resetPermissionsAfterUpdates = try container.decodeIfPresent(Bool.self, forKey: .resetPermissionsAfterUpdates) ?? true
         launchAtLogin = try container.decode(Bool.self, forKey: .launchAtLogin)
         showOtherSleepBlockers = try container.decodeIfPresent(Bool.self, forKey: .showOtherSleepBlockers) ?? false
         updateChannel = try container.decodeIfPresent(UpdateChannel.self, forKey: .updateChannel) ?? .stable
