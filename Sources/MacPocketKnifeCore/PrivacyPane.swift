@@ -27,15 +27,3 @@ public enum PrivacyPane: Equatable, Sendable {
         }
     }
 }
-
-extension ScreenRecordingFailure {
-    /// The settings pane that can resolve a permission failure, if applicable.
-    public var privacyPane: PrivacyPane? {
-        switch self {
-        case .permissionDenied: return .screenRecording
-        case .microphoneDenied: return .microphone
-        case .lowDiskSpace, .noDisplay, .captureFailed, .writingFailed, .folderUnavailable:
-            return nil
-        }
-    }
-}

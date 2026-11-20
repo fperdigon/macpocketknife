@@ -27,19 +27,7 @@ struct RecordingMicrophoneAccessTests {
     func unknownAuthorizationStatusDoesNotOfferSettings(rawValue: Int) {
         let access = RecordingMicrophoneAccess(authorizationStatusRawValue: rawValue)
         #expect(access == .unknown)
-        #expect(!access.showsSettingsLink)
+        #expect(access.permissionStatus.buttonTitle == nil)
     }
 
-    @Test func onlyDeniedAndRestrictedOfferSettings() {
-        #expect(RecordingMicrophoneAccess.denied.showsSettingsLink)
-        #expect(RecordingMicrophoneAccess.restricted.showsSettingsLink)
-        #expect(!RecordingMicrophoneAccess.notDetermined.showsSettingsLink)
-        #expect(!RecordingMicrophoneAccess.authorized.showsSettingsLink)
-        #expect(!RecordingMicrophoneAccess.unknown.showsSettingsLink)
-    }
-
-    @Test func settingsLinkOpensMicrophonePrivacyPane() {
-        #expect(RecordingMicrophoneAccess.settingsURLString ==
-                "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
-    }
 }

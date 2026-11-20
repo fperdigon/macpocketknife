@@ -19,9 +19,7 @@ public final class ScreenRecordingController {
     public enum State: Equatable { case idle, starting, recording, stopping, error }
     public private(set) var state: State = .idle
     public private(set) var lastError: String?
-    public private(set) var lastFailure: ScreenRecordingFailure?
     public private(set) var lastNotice: String?
-    public private(set) var lastNoticePrivacyPane: PrivacyPane?
     public private(set) var elapsedSeconds = 0
     public private(set) var lastSavedFiles: [URL] = []
     public var lastSavedFile: URL? { lastSavedFiles.first }
@@ -129,9 +127,7 @@ public final class ScreenRecordingController {
 
     private func start(settings: AppSettings, target: ScreenRecordingTarget?) {
         lastError = nil
-        lastFailure = nil
         lastNotice = nil
-        lastNoticePrivacyPane = nil
         lastSavedFiles = []
         sessions = []
         interruptedDisplays = []
@@ -225,7 +221,6 @@ public final class ScreenRecordingController {
                                 }
                                 if microphone == .unsupported { reportedUnsupportedMicrophone = true }
                             }
-                            if microphone == .denied { lastNoticePrivacyPane = .microphone }
                             session.didStart = true
                             if stopRequested { _ = session.stop() }
                         } catch {
@@ -333,7 +328,6 @@ public final class ScreenRecordingController {
             AppLog.shared.warning(category: "permission", "Microphone denied for recording")
         }
         if state == .idle || state == .error { state = .error }
-        lastFailure = failure
         lastError = failure.message
         onChange?()
         let notice = NoticeComposer().composeScreenRecording(failure: failure)

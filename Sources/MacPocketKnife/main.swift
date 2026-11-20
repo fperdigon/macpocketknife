@@ -69,8 +69,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let keepUnlocked = NSMenuItem(title: "Keep unlocked", action: nil, keyEquivalent: "")
     private let dictate = NSMenuItem(title: "Dictate", action: nil, keyEquivalent: "")
     private let recordScreen = NSMenuItem(title: "Record screen…", action: nil, keyEquivalent: "")
-    private let screenRecordingStatus = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-    private let dictationStatus = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let authorization = NSMenuItem(title: "Notifications: checking…", action: nil, keyEquivalent: "")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -143,29 +141,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let recordings = NSMenuItem(title: "Show recordings in Finder", action: #selector(showRecordings), keyEquivalent: "")
         recordings.target = self
         menu.addItem(recordings)
-        screenRecordingStatus.target = self
-        screenRecordingStatus.action = #selector(openScreenRecordingStatusPrivacy)
-        screenRecordingStatus.isHidden = true
-        menu.addItem(screenRecordingStatus)
-        dictationStatus.target = self
-        dictationStatus.action = #selector(openMicrophonePrivacy)
-        dictationStatus.isHidden = true
-        menu.addItem(dictationStatus)
-        let permissions = NSMenuItem(title: "Permissions", action: nil, keyEquivalent: "")
-        let permissionMenu = NSMenu(title: "Permissions")
-        permissionMenu.autoenablesItems = false
-        let screenPermission = NSMenuItem(
-            title: "Screen & System Audio Recording…", action: #selector(openScreenRecordingPrivacy), keyEquivalent: ""
-        )
-        screenPermission.target = self
-        permissionMenu.addItem(screenPermission)
-        let microphonePermission = NSMenuItem(
-            title: "Microphone…", action: #selector(openMicrophonePrivacy), keyEquivalent: ""
-        )
-        microphonePermission.target = self
-        permissionMenu.addItem(microphonePermission)
-        permissions.submenu = permissionMenu
-        menu.addItem(permissions)
         authorization.isEnabled = false
         menu.addItem(authorization)
         menu.addItem(.separator())
@@ -308,9 +283,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         recordScreen.title = screenLabel + screenShortcut
         recordScreen.state = screenBusy ? .on : .off
         recordScreen.isEnabled = screenRecording.state != .stopping
-        let screenError = screenRecording.lastError ?? settings.screenRecordingHotkeyError ?? screenRecording.lastNotice
-        screenRecordingStatus.title = screenError ?? ""
-        screenRecordingStatus.isHidden = screenError == nil
         var indicators = recording ? " ●" : ""
         if screenActive { indicators += " ⏺ " + screenRecording.elapsedTitle }
         statusItem?.length = (recording || screenActive) ? NSStatusItem.variableLength : NSStatusItem.squareLength
@@ -318,9 +290,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             string: indicators, attributes: [.foregroundColor: NSColor.systemRed]
         )
         statusItem?.button?.imagePosition = .imageLeading
-        let error = dictation.lastError ?? settings.dictationHotkeyError
-        dictationStatus.title = error ?? ""
-        dictationStatus.isHidden = error == nil
     }
 
     private func updateAuthorization(_ state: AuthorizationState) {
@@ -410,25 +379,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func showRecordings() {
         screenRecording.showRecordings(folderPath: settings.settings.screenRecordingFolder)
-    }
-
-    @objc private func openScreenRecordingPrivacy() {
-        openPrivacyPane(.screenRecording)
-    }
-
-    @objc private func openMicrophonePrivacy() {
-        openPrivacyPane(.microphone)
-    }
-
-    @objc private func openScreenRecordingStatusPrivacy() {
-        let pane = screenRecording.lastFailure?.privacyPane ?? screenRecording.lastNoticePrivacyPane
-        openPrivacyPane(pane ?? .screenRecording)
-    }
-
-    private func openPrivacyPane(_ pane: PrivacyPane) {
-        if let url = URL(string: pane.settingsURLString) {
-            NSWorkspace.shared.open(url)
-        }
     }
 
     @objc private func showSettings() {

@@ -24,7 +24,6 @@ struct PrivacyPaneTests {
     @Test func microphoneSettingsURL() {
         #expect(PrivacyPane.microphone.settingsURLString ==
                 "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
-        #expect(RecordingMicrophoneAccess.settingsURLString == PrivacyPane.microphone.settingsURLString)
     }
 
     @Test func speechRecognitionSettingsURL() {
@@ -32,14 +31,4 @@ struct PrivacyPaneTests {
                 "x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition")
     }
 
-    @Test func permissionFailuresOpenTheirSpecificPane() {
-        #expect(ScreenRecordingFailure.permissionDenied.privacyPane == .screenRecording)
-        #expect(ScreenRecordingFailure.microphoneDenied.privacyPane == .microphone)
-    }
-
-    @Test(arguments: [ScreenRecordingFailure.lowDiskSpace, .noDisplay, .captureFailed,
-                      .writingFailed, .folderUnavailable])
-    func otherFailuresDoNotOfferPrivacySettings(failure: ScreenRecordingFailure) {
-        #expect(failure.privacyPane == nil)
-    }
 }

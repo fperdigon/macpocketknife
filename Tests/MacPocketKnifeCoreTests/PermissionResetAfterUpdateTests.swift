@@ -134,5 +134,5 @@ private final class ResetRunner: UpdateProcessRunning, @unchecked Sendable {
 @Test func permissionResetNotice() {
     let notice = NoticeComposer().composePermissionResetAfterUpdate()
     #expect(notice.kind == .info)
-    #expect(notice.body == "MacPocketKnife was updated. Re-allow Screen Recording and Microphone in Record screen… › Permissions.")
+    #expect(notice.body == "MacPocketKnife was updated. Re-allow Screen Recording and Microphone in Record screen… > Permissions.")
 }

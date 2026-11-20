@@ -51,7 +51,7 @@ final class RecordingDisplayThumbnails: ObservableObject {
 
     func allowPreview() {
         CGRequestScreenCaptureAccess()
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+        if let url = URL(string: PrivacyPane.screenRecording.settingsURLString) {
             NSWorkspace.shared.open(url)
         }
         retry?.cancel()

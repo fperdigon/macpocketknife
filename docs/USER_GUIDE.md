@@ -75,9 +75,8 @@ it never falls back to server recognition.
 
 The first use requests **Microphone** and **Speech Recognition** permissions.
 If denied, allow MacPocketKnife under **System Settings > Privacy & Security >
-Microphone / Speech Recognition**, then retry. Error guidance also appears in the
-menu and opens Microphone settings when clicked. The menu's always-visible
-**Permissions > Microphone…** shortcut opens the same pane. A working default audio input is
+Microphone / Speech Recognition**, then retry. Microphone permission controls are
+available in **Record screen… > Permissions** and **Settings > Tools**. A working default audio input is
 required; change it under **System Settings > Sound** if needed.
 
 Apple's Speech framework processes speech on device. MacPocketKnife does not save
@@ -104,14 +103,17 @@ Privacy & Security > Screen Recording**. Previews retry when you return to the
 window or after a few seconds. macOS may ask again after an app update.
 
 The recording window always shows a **Permissions** section with **Screen
-Recording** and **Microphone** rows. **Open Screen Recording settings** opens
-the screen capture permission pane, and **Allow screen preview** still requests
-access when previews need it. The Microphone row shows **Allowed**, **Not asked
-yet**, or **Denied**. Choose **Allow microphone** to request access when it has
-not been requested, or **Open Microphone settings** when access is denied or
-restricted. Once allowed, no microphone permission button is shown. Status
-refreshes when the window appears, the app becomes active, or the window becomes
-key.
+Recording** and **Microphone** rows. Successful previews show a check mark and
+**Allowed** for Screen Recording, with no permission button. While previews are
+loading or access has not been checked, the status is neutral. If previews fail,
+**Open Screen Recording settings** opens the screen capture permission pane;
+**Allow screen preview** still requests access and retries previews.
+The Microphone row shows a check mark and **Allowed** with no button when access
+is granted. Choose **Allow microphone** when it has not been requested, or
+**Open Microphone settings** when access is denied or restricted. The Settings >
+Tools microphone button also disappears once authorized. Status refreshes when
+the window appears, the app becomes active, the window becomes key, and preview
+polling changes. Permission controls do not appear in the menu bar drop-down.
 
 After an update, the app resets its old permission entries automatically when
 **Reset permissions after updates** is enabled in **Settings > General**.
@@ -164,8 +166,8 @@ Accessibility access. **Include microphone (mixed into the same audio track)** d
 On macOS 15+, your microphone and system audio are mixed into one 48 kHz stereo
 AAC track so players hear both. Turn it off in **Settings > Tools > Screen recording >
 Include microphone**. If microphone access is denied or
-the device cannot start, video and system audio still record; the menu status and
-saved notification explain the fallback. Allow access in **System Settings >
+the device cannot start, video and system audio still record; the
+saved notification explains the fallback. Allow access in **System Settings >
 Privacy & Security > Microphone** to include your voice. The recording window's
 **Permissions > Microphone** row is always visible, and **Open Microphone
 settings** remains available next to the toggle in **Settings > Tools** when
@@ -179,11 +181,8 @@ On first use, approve the macOS **Screen Recording** prompt. In **System Setting
 Privacy & Security > Screen & System Audio Recording**, enable MacPocketKnife
 (the pane may be called **Screen Recording** on older macOS versions). You may
 need to quit and relaunch the app after granting access, then start recording
-again. The menu always includes **Permissions > Screen & System Audio
-Recording…** and **Permissions > Microphone…**, each opening its own pane.
-Recording permission errors open the matching pane when clicked: screen access
-errors open Screen Recording settings and microphone access errors open
-Microphone settings. Microphone fallback guidance also opens Microphone settings.
+again. Open **Record screen… > Permissions** to check access and open the
+matching System Settings pane when permission is needed.
 Starting a recording requests microphone access only if **Include microphone**
 is enabled; you can also request it explicitly with **Allow microphone** in the
 recording window.
