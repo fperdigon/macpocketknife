@@ -20,6 +20,11 @@ fix and disclosure through the advisory; no response deadline is guaranteed.
 - Process termination: incorrect console classification, current-user ownership
   checks, battery thresholds, retry limits, and actions affecting unrelated
   processes or other users' sessions.
+- Updater: the in-app updater relies on HTTPS to github.com, a SHA-256 digest,
+  structural checks, and ad-hoc code-signature consistency. It does not
+  authenticate the publisher beyond GitHub account and release control; a
+  signed-update scheme is planned. Reports of bypasses of the checks above are in
+  scope.
 
 The policy engine currently returns proposed actions; app wiring and process
 termination execution are planned. Reports about the implemented core components

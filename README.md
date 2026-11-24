@@ -136,6 +136,11 @@ opt-in and disabled by default in the core formatter.
 
 Daily diagnostic logs stay on this Mac for 30 days; open them in **Settings > About > Logs**.
 
+The in-app updater downloads over HTTPS from GitHub, requires a SHA-256 digest,
+and runs structural and ad-hoc code-signature consistency checks. It does not
+authenticate the publisher beyond control of the GitHub account and releases; a
+signed-update scheme is planned (details in [privacy](docs/PRIVACY.md)).
+
 See [privacy and removal details](docs/PRIVACY.md). Report vulnerabilities using
 the private process in [SECURITY.md](SECURITY.md).
 
