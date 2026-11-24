@@ -1,0 +1,28 @@
+name: CodeQL
+
+on:
+  schedule:
+    - cron: '23 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode 16.4
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: swift
+          build-mode: manual
+      - name: Build
+        run: swift build
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:swift
