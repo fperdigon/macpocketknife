@@ -55,7 +55,8 @@ struct RecordingFiles: RecordingFileManaging {
 /// Writer and inputs belong exclusively to queue after initialization. Sample buffers
 /// never cross into a main-actor Task. finish drains the same queue before closing inputs.
 private final class RecordingOutput: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
-    let queue = DispatchQueue(label: "net.core-ai.MacPocketKnife.screen-recording")
+    let queue = DispatchQueue(label: "io.github.fperdigon.macpocketknife.screen-recording")
+    private var flushAttempts = 0
     private let writer: AVAssetWriter
     private let video: AVAssetWriterInput
     private let audio: AVAssetWriterInput
@@ -275,7 +276,11 @@ private final class RecordingOutput: NSObject, SCStreamOutput, SCStreamDelegate,
     private func finishWhenReady(_ continuation: CheckedContinuation<URL?, Error>) {
         if mixesMicrophone && firstVideoTime != nil && writer.status == .writing {
             drainAudio(upTo: mixer.endPosition, flushing: true)
-            if mixer.position < mixer.endPosition && writer.status == .writing && !reportedFailure {
+            // Bounded retry (500 x 10 ms): never hang if the writer input stays unready;
+            // finalize with whatever was written instead.
+            if mixer.position < mixer.endPosition && writer.status == .writing && !reportedFailure
+                && flushAttempts < 500 {
+                flushAttempts += 1
                 queue.asyncAfter(deadline: .now() + .milliseconds(10)) { [self] in
                     finishWhenReady(continuation)
                 }
