@@ -32,22 +32,37 @@ public final class TelegramNotifier: AlertNotifying {
         self.machineName = machineName
     }
 
+    public nonisolated var deliversRemotely: Bool { true }
+
+    /// Coarse failure category only: never the token, URL, chat or message text.
+    nonisolated static func failureCategory(_ error: Error) -> String {
+        if error is CancellationError { return "cancelled" }
+        guard let failure = error as? TelegramError else { return "unknown" }
+        switch failure {
+        case .invalidToken: return "invalidToken"
+        case .rateLimited: return "rateLimited"
+        case .network: return "network"
+        case .malformedResponse: return "malformedResponse"
+        case .apiFailure: return "apiFailure"
+        }
+    }
+
     public func deliver(_ notice: Notice) async {
         let preferences = settings.settings.telegram
         guard preferences.isEnabled, let value = preferences.chatID,
               let chatID = Int64(value) else { return }
-        var credential: String?
         do {
             guard let token = try secrets.secret(for: .telegramBotToken), !token.isEmpty else { return }
-            credential = token
             let channel = TelegramChannel(
                 client: TelegramClient(token: token, transport: transport), chatID: chatID,
                 includeMachineName: preferences.includeMachineName ? machineName() : nil
             )
             try await channel.send(notice: notice, silent: preferences.silentMode)
         } catch {
-            // Discard diagnostics after redaction; never expose arbitrary transport errors.
-            _ = Redactor.redact(String(describing: error), secrets: credential.map { [$0] } ?? [])
+            // Log a fixed category only; arbitrary errors can carry the credential-bearing URL.
+            AppLog.shared.warning(
+                category: "telegram", "Delivery failed category=\(Self.failureCategory(error))"
+            )
         }
     }
 }

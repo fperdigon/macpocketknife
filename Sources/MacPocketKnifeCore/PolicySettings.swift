@@ -30,4 +30,15 @@ public struct PolicySettings: Codable, Sendable, Equatable {
         self.maxKillsPerWindow = max(0, maxKillsPerWindow)
         self.killWindow = killWindow.isFinite ? max(1, killWindow) : 60
     }
+
+    private enum CodingKeys: String, CodingKey { case killThresholdPercent, maxKillsPerWindow, killWindow }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            killThresholdPercent: container.lenient(Int.self, .killThresholdPercent) ?? 15,
+            maxKillsPerWindow: container.lenient(Int.self, .maxKillsPerWindow) ?? 3,
+            killWindow: container.lenient(TimeInterval.self, .killWindow) ?? 60
+        )
+    }
 }

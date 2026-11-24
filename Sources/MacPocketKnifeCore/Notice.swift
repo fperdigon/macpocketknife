@@ -40,4 +40,10 @@ public struct Notice: Sendable, Equatable {
 
 public protocol AlertNotifying: Sendable {
     func deliver(_ notice: Notice) async
+    /// True for channels that leave the machine. They must never block alerting logic.
+    var deliversRemotely: Bool { get }
+}
+
+public extension AlertNotifying {
+    var deliversRemotely: Bool { false }
 }

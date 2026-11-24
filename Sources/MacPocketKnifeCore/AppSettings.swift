@@ -14,6 +14,13 @@
 
 @preconcurrency import Foundation
 
+extension KeyedDecodingContainer {
+    /// nil when the key is absent, null, mistyped or holds an unknown enum value.
+    func lenient<T: Decodable>(_ type: T.Type, _ key: Key) -> T? {
+        (try? decodeIfPresent(type, forKey: key)) ?? nil
+    }
+}
+
 public struct TelegramPreferences: Codable, Equatable, Sendable {
     public var isEnabled: Bool
     public var chatID: String?
@@ -28,6 +35,16 @@ public struct TelegramPreferences: Codable, Equatable, Sendable {
         self.chatID = chatID
         self.silentMode = silentMode
         self.includeMachineName = includeMachineName
+    }
+
+    private enum CodingKeys: String, CodingKey { case isEnabled, chatID, silentMode, includeMachineName }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        isEnabled = container.lenient(Bool.self, .isEnabled) ?? false
+        chatID = container.lenient(String.self, .chatID)
+        silentMode = container.lenient(Bool.self, .silentMode) ?? false
+        includeMachineName = container.lenient(Bool.self, .includeMachineName) ?? false
     }
 }
 
@@ -92,32 +109,32 @@ public struct AppSettings: Codable, Equatable, Sendable {
         case updateChannel, checkForUpdatesAutomatically, skippedVersion, showOtherSleepBlockers
     }
 
+    /// Every field decodes independently: a missing, mistyped or unknown value only resets that field.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        // Existing fields remain required so corrupt settings still use the store's fallback.
-        alerts = try container.decode(AlertSettings.self, forKey: .alerts)
-        policy = try container.decode(PolicySettings.self, forKey: .policy)
-        keepAwakeDefaultDuration = try container.decodeIfPresent(TimeInterval.self, forKey: .keepAwakeDefaultDuration)
-        telegram = try container.decode(TelegramPreferences.self, forKey: .telegram)
-        resetPermissionsAfterUpdates = try container.decodeIfPresent(Bool.self, forKey: .resetPermissionsAfterUpdates) ?? true
-        launchAtLogin = try container.decode(Bool.self, forKey: .launchAtLogin)
-        showOtherSleepBlockers = try container.decodeIfPresent(Bool.self, forKey: .showOtherSleepBlockers) ?? false
-        updateChannel = try container.decodeIfPresent(UpdateChannel.self, forKey: .updateChannel) ?? .stable
-        checkForUpdatesAutomatically = try container.decodeIfPresent(Bool.self, forKey: .checkForUpdatesAutomatically) ?? true
-        dictationHotkeyEnabled = try container.decodeIfPresent(Bool.self, forKey: .dictationHotkeyEnabled) ?? true
-        dictationHotkeyKey = try container.decodeIfPresent(String.self, forKey: .dictationHotkeyKey) ?? "T"
-        dictationLanguage = try container.decodeIfPresent(String.self, forKey: .dictationLanguage)
-        screenRecordingHotkeyEnabled = try container.decodeIfPresent(Bool.self, forKey: .screenRecordingHotkeyEnabled) ?? true
-        screenRecordingHotkeyKey = try container.decodeIfPresent(String.self, forKey: .screenRecordingHotkeyKey) ?? "R"
-        screenRecordingFrameRate = try container.decodeIfPresent(Int.self, forKey: .screenRecordingFrameRate) ?? 30
-        screenRecordingShowsCursor = try container.decodeIfPresent(Bool.self, forKey: .screenRecordingShowsCursor) ?? true
-        audioRecordingMicrophone = try container.decodeIfPresent(Bool.self, forKey: .audioRecordingMicrophone) ?? true
-        audioRecordingSystemAudio = try container.decodeIfPresent(Bool.self, forKey: .audioRecordingSystemAudio) ?? true
-        screenRecordingIncludesMicrophone = try container.decodeIfPresent(Bool.self, forKey: .screenRecordingIncludesMicrophone) ?? true
-        screenRecordingTarget = try container.decodeIfPresent(ScreenRecordingTarget.self, forKey: .screenRecordingTarget) ?? .mainDisplay
-        screenRecordingDisplayName = try container.decodeIfPresent(String.self, forKey: .screenRecordingDisplayName)
-        screenRecordingFolder = try container.decodeIfPresent(String.self, forKey: .screenRecordingFolder) ?? ScreenRecordingFiles.defaultFolder
-        skippedVersion = try container.decodeIfPresent(String.self, forKey: .skippedVersion)
+        alerts = container.lenient(AlertSettings.self, .alerts) ?? AlertSettings()
+        policy = container.lenient(PolicySettings.self, .policy) ?? PolicySettings()
+        keepAwakeDefaultDuration = container.lenient(TimeInterval.self, .keepAwakeDefaultDuration)
+        telegram = container.lenient(TelegramPreferences.self, .telegram) ?? TelegramPreferences()
+        resetPermissionsAfterUpdates = container.lenient(Bool.self, .resetPermissionsAfterUpdates) ?? true
+        launchAtLogin = container.lenient(Bool.self, .launchAtLogin) ?? false
+        showOtherSleepBlockers = container.lenient(Bool.self, .showOtherSleepBlockers) ?? false
+        updateChannel = container.lenient(UpdateChannel.self, .updateChannel) ?? .stable
+        checkForUpdatesAutomatically = container.lenient(Bool.self, .checkForUpdatesAutomatically) ?? true
+        dictationHotkeyEnabled = container.lenient(Bool.self, .dictationHotkeyEnabled) ?? true
+        dictationHotkeyKey = container.lenient(String.self, .dictationHotkeyKey) ?? "T"
+        dictationLanguage = container.lenient(String.self, .dictationLanguage)
+        screenRecordingHotkeyEnabled = container.lenient(Bool.self, .screenRecordingHotkeyEnabled) ?? true
+        screenRecordingHotkeyKey = container.lenient(String.self, .screenRecordingHotkeyKey) ?? "R"
+        screenRecordingFrameRate = container.lenient(Int.self, .screenRecordingFrameRate) ?? 30
+        screenRecordingShowsCursor = container.lenient(Bool.self, .screenRecordingShowsCursor) ?? true
+        audioRecordingMicrophone = container.lenient(Bool.self, .audioRecordingMicrophone) ?? true
+        audioRecordingSystemAudio = container.lenient(Bool.self, .audioRecordingSystemAudio) ?? true
+        screenRecordingIncludesMicrophone = container.lenient(Bool.self, .screenRecordingIncludesMicrophone) ?? true
+        screenRecordingTarget = container.lenient(ScreenRecordingTarget.self, .screenRecordingTarget) ?? .mainDisplay
+        screenRecordingDisplayName = container.lenient(String.self, .screenRecordingDisplayName)
+        screenRecordingFolder = container.lenient(String.self, .screenRecordingFolder) ?? ScreenRecordingFiles.defaultFolder
+        skippedVersion = container.lenient(String.self, .skippedVersion)
     }
 
     /// Keep thresholds strictly ordered and intervals finite and at least ten seconds.

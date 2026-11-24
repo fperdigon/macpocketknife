@@ -19,15 +19,36 @@ public protocol HTTPTransport: Sendable {
 }
 
 public struct URLSessionTransport: HTTPTransport {
-    private let session: URLSession
+    public static let defaultRequestTimeout: TimeInterval = 10
 
-    public init(session: URLSession = .shared) {
-        self.session = session
+    private let session: URLSession
+    private let requestTimeout: TimeInterval
+
+    /// Dedicated, cache-free session so one slow endpoint cannot hold a request for 60 s.
+    public static func makeSession(requestTimeout: TimeInterval = defaultRequestTimeout) -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = requestTimeout
+        configuration.timeoutIntervalForResource = requestTimeout * 2
+        configuration.waitsForConnectivity = false
+        return URLSession(configuration: configuration)
+    }
+
+    public init(
+        session: URLSession? = nil, requestTimeout: TimeInterval = URLSessionTransport.defaultRequestTimeout
+    ) {
+        self.requestTimeout = requestTimeout
+        self.session = session ?? Self.makeSession(requestTimeout: requestTimeout)
+    }
+
+    func timed(_ request: URLRequest) -> URLRequest {
+        var copy = request
+        copy.timeoutInterval = requestTimeout
+        return copy
     }
 
     public func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         do {
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await session.data(for: timed(request))
             guard let response = response as? HTTPURLResponse else {
                 throw TelegramError.malformedResponse
             }

@@ -14,7 +14,7 @@
 
 import Foundation
 import Testing
-import MacPocketKnifeCore
+@testable import MacPocketKnifeCore
 
 @MainActor
 private final class NotifierSettings: AssistantSettingsProviding {
@@ -28,6 +28,28 @@ private final class DeliveredNotices: AlertNotifying {
     func deliver(_ notice: Notice) async {
         values.append(notice)
         onDelivery?()
+    }
+}
+
+/// Captures fire-and-forget remote deliveries so tests can await them deterministically.
+private final class RemoteTasks: @unchecked Sendable {
+    private let lock = NSLock()
+    private var tasks: [Task<Void, Never>] = []
+    var dispatch: CompositeNotifier.RemoteDispatch {
+        { [self] work in
+            let task = Task { await work() }
+            lock.lock(); tasks.append(task); lock.unlock()
+        }
+    }
+    private func take() -> [Task<Void, Never>] {
+        lock.lock(); defer { lock.unlock() }
+        let pending = tasks
+        tasks = []
+        return pending
+    }
+    func drain() async {
+        let pending = take()
+        for task in pending { await task.value }
     }
 }
 
@@ -45,8 +67,10 @@ private let notifierNotice = Notice(kind: .info, title: "Keep-awake status", bod
     let telegram = TelegramNotifier(settings: settings, secrets: secrets, transport: transport,
                                     machineName: { Issue.record("Machine name is opt-in"); return nil })
     // Telegram comes first deliberately: local must still receive every notice.
-    await CompositeNotifier(channels: [telegram, local]).deliver(notifierNotice)
+    let remote = RemoteTasks()
+    await CompositeNotifier(channels: [telegram, local], dispatchRemote: remote.dispatch).deliver(notifierNotice)
     #expect(local.values == [notifierNotice])
+    await remote.drain()
     #expect(await transport.requests.count == (scenario == "transport failure" ? 1 : 0))
 }
 
@@ -90,22 +114,68 @@ private final class SuspendedNotifier: AlertNotifying {
     }
 }
 
-@Test @MainActor func compositeDeliversLocallyWhileAnotherChannelIsSuspended() async {
-    let suspended = SuspendedNotifier()
+@MainActor
+private final class StubRemote: AlertNotifying {
+    nonisolated var deliversRemotely: Bool { true }
+    var started = false
+    var continuation: CheckedContinuation<Void, Never>?
+    func deliver(_ notice: Notice) async {
+        started = true
+        await withCheckedContinuation { continuation = $0 }
+    }
+}
+
+@Test @MainActor func compositeNeverWaitsForSuspendedRemoteChannel() async {
+    let remote = StubRemote()
     let local = DeliveredNotices()
-    let delivery = Task {
-        await CompositeNotifier(channels: [suspended, local]).deliver(notifierNotice)
-    }
-    if suspended.continuation == nil {
-        await withCheckedContinuation { suspended.started = $0 }
-    }
-    if local.values.isEmpty {
-        await withCheckedContinuation { continuation in
-            local.onDelivery = { continuation.resume() }
-        }
-    }
-    local.onDelivery = nil
+    let tasks = RemoteTasks()
+    // Returns even though the remote channel never completes (fire-and-forget).
+    await CompositeNotifier(channels: [remote, local], dispatchRemote: tasks.dispatch).deliver(notifierNotice)
     #expect(local.values == [notifierNotice])
-    suspended.continuation?.resume()
-    await delivery.value
+    while remote.continuation == nil { await Task.yield() }
+    #expect(remote.started)
+    remote.continuation?.resume()
+    await tasks.drain()
+}
+
+@Test @MainActor func compositeDefaultDispatchDeliversRemoteDetached() async {
+    let remote = DeliveredRemote()
+    await CompositeNotifier(channels: [remote]).deliver(notifierNotice)
+    while remote.values.isEmpty { await Task.yield() }
+    #expect(remote.values == [notifierNotice])
+}
+
+@MainActor
+private final class DeliveredRemote: AlertNotifying {
+    nonisolated var deliversRemotely: Bool { true }
+    var values: [Notice] = []
+    func deliver(_ notice: Notice) async { values.append(notice) }
+}
+
+@Test func localChannelsAreNotRemoteByDefault() {
+    #expect(LocalDefault().deliversRemotely == false)
+}
+
+private struct LocalDefault: AlertNotifying {
+    func deliver(_ notice: Notice) async {}
+}
+
+@Test @MainActor func telegramNotifierIsRemote() {
+    let notifier = TelegramNotifier(settings: NotifierSettings(), secrets: InMemorySecretStore())
+    #expect(notifier.deliversRemotely)
+}
+
+@Test func transportTimeoutIsExplicit() throws {
+    let session = URLSessionTransport.makeSession()
+    #expect(session.configuration.timeoutIntervalForRequest == 10)
+    #expect(session.configuration.timeoutIntervalForResource == 20)
+    #expect(URLSessionTransport.defaultRequestTimeout == 10)
+    let custom = URLSessionTransport.makeSession(requestTimeout: 3)
+    #expect(custom.configuration.timeoutIntervalForRequest == 3)
+}
+
+@Test func transportStampsRequestTimeout() throws {
+    let url = try #require(URL(string: "https://example.invalid/x"))
+    let transport = URLSessionTransport(requestTimeout: 4)
+    #expect(transport.timed(URLRequest(url: url)).timeoutInterval == 4)
 }
