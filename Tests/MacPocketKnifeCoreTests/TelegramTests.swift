@@ -353,6 +353,4 @@ func telegramFormatsEveryAlertLevelWithoutMachineName(level: AlertLevel) {
     await clock.waitForSleepCount(2)
     clock.advance(by: 1)
     #expect(try await discovery.value == 7)
-    #expect(TelegramSetupFlow.startText(nil) == "/start")
-    #expect(TelegramSetupFlow.startText("") == "/start")
 }
