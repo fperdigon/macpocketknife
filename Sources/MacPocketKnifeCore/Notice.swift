@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import Foundation
+
 public enum NoticeKind: String, Sendable, Equatable {
     case batteryAlert
     case keepAwakeDetected
@@ -25,12 +27,14 @@ public struct Notice: Sendable, Equatable {
     public let title: String
     public let body: String
     public let level: AlertLevel?
+    public let recordingFile: URL?
 
-    public init(kind: NoticeKind, title: String, body: String, level: AlertLevel? = nil) {
+    public init(kind: NoticeKind, title: String, body: String, level: AlertLevel? = nil, recordingFile: URL? = nil) {
         self.kind = kind
         self.title = title
         self.body = body
         self.level = level
+        self.recordingFile = recordingFile
     }
 }
 

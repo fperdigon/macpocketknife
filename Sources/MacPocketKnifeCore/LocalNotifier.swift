@@ -59,6 +59,10 @@ public final class LocalNotifier: AlertNotifying {
         content.body = notice.body
         content.threadIdentifier = "macpocketknife.\(notice.kind.rawValue)"
         content.sound = .default
+        if let file = notice.recordingFile {
+            content.categoryIdentifier = "recording-saved"
+            content.userInfo = ["recordingFile": file.path]
+        }
         switch notice.level {
         case .urgent, .critical: content.interruptionLevel = .timeSensitive
         case .normal, nil: content.interruptionLevel = .active

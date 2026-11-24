@@ -169,3 +169,18 @@ private let localTestBundleIdentifier = "example.notifications"
     #expect(threads.count == kinds.count)
     #expect(center.pending.count == 9)
 }
+
+@Test(arguments: [false, true])
+@MainActor func recordingSaveNotificationCarriesFinderAction(audio: Bool) async throws {
+    let center = FakeNotificationCenter()
+    let notifier = LocalNotifier(center: center, bundleIdentifier: localTestBundleIdentifier)
+    let ext = audio ? "m4a" : "mp4"
+    let file = URL(fileURLWithPath: "/Movies/Recording example.\(ext)")
+    let composer = NoticeComposer()
+    let notice = audio ? composer.composeAudioRecording(savedFile: file) : composer.composeScreenRecording(savedFile: file)
+    await notifier.deliver(notice)
+    let content = try #require(center.requests.first?.content)
+    #expect(content.categoryIdentifier == "recording-saved")
+    #expect(content.userInfo["recordingFile"] as? String == file.path)
+    #expect(center.authorizationRequests == 0)
+}

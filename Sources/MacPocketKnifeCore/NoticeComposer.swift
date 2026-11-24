@@ -69,7 +69,8 @@ public struct NoticeComposer: NoticeComposing {
 
     public func composeScreenRecording(savedFile: URL) -> Notice {
         Notice(kind: .info, title: "Screen recording saved",
-               body: "\(savedFile.lastPathComponent)\nFolder: \(savedFile.deletingLastPathComponent().path)")
+               body: "\(savedFile.lastPathComponent)\nFolder: \(savedFile.deletingLastPathComponent().path)",
+               recordingFile: savedFile)
     }
 
     public func composeScreenRecording(savedFiles: [URL], interruptedDisplays: [String] = [], notice: String? = nil) -> Notice {
@@ -87,7 +88,13 @@ public struct NoticeComposer: NoticeComposing {
             body += "\nSharing ended early: " + interruptedDisplays.joined(separator: ", ") + "."
         }
         if let notice { body += "\n" + notice }
-        return Notice(kind: .info, title: title, body: body)
+        return Notice(kind: .info, title: title, body: body, recordingFile: savedFiles.first)
+    }
+
+    public func composeAudioRecording(savedFile: URL, notice: String? = nil) -> Notice {
+        var body = "\(savedFile.lastPathComponent)\nFolder: \(savedFile.deletingLastPathComponent().path)"
+        if let notice { body += "\n" + notice }
+        return Notice(kind: .info, title: "Audio recording saved", body: body, recordingFile: savedFile)
     }
 
     public func composeScreenRecording(failure: ScreenRecordingFailure) -> Notice {

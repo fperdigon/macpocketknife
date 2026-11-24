@@ -27,6 +27,30 @@ those services are outside this app's control. Empty sessions leave the clipboar
 unchanged; errors discard the session. Recording is limited to ten minutes.
 Only dictation preferences (shortcut and language) are stored in UserDefaults.
 
+## Audio-only recording
+
+**Record audio…** uses Apple's ScreenCaptureKit and AVAssetWriter locally to save
+one AAC `.m4a` file. You choose microphone, system audio, or both. Microphone
+capture requires macOS 15+; macOS 13/14 supports system audio only. The toggles
+are stored locally and default on. Microphone permission is requested only when
+selected. A denied or unavailable microphone falls back to system audio when
+selected, with a notice; a microphone-only attempt fails instead.
+
+ScreenCaptureKit requires Screen Recording permission. The stream uses tiny,
+low-frame-rate video frames that are discarded immediately: no video track or
+screenshots are written. The options window captures no previews. PCM conversion
+and mixing use memory-only buffers. The app's own system audio is excluded.
+
+Recordings stay in the same user-selected recordings folder as video (default
+`~/Movies/MacPocketKnife`), with `Audio YYYY-MM-DD HH.MM.SS.m4a` names. A hidden
+`.Recording-<uuid>.m4a` working file holds encoded audio during recording and is
+renamed after finalization; unusable output is removed. Files remain until you
+delete them. Audio and video capture cannot run together. Save notifications
+contain the file name and folder, and **Show in Finder** selects the local file.
+Diagnostics record state changes, duration, and fixed failure categories only.
+No audio or recording content is logged, uploaded, or sent to Telegram. There is
+no cloud processing, telemetry, or server fallback for this feature.
+
 ## Screen recording
 
 Screen recording uses Apple's ScreenCaptureKit and AVAssetWriter to save selected
