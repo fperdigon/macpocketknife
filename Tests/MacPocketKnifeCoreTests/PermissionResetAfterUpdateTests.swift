@@ -106,17 +106,21 @@ private final class ResetRunner: UpdateProcessRunning, @unchecked Sendable {
 @Test func permissionResetRunsConcurrentlyAndSyncWrapperWorks() async {
     let storage = ResetStorage()
     let runner = ResetRunner(storage: storage)
-    runner.delay = 0.3
+    runner.delay = 0.6
     let reset = PermissionResetAfterUpdate(processes: runner, storage: storage, buildID: { "new" }, logger: .noop)
     let start = Date()
     #expect(await reset.run(enabled: true, channel: "stable", environment: [:], arguments: []))
-    // Three serial 0.3 s resets would take at least 0.9 s.
-    #expect(Date().timeIntervalSince(start) < 0.85)
+    // Three serial 0.6 s resets would take at least 1.8 s; allow scheduling slack.
+    #expect(Date().timeIntervalSince(start) < 1.5)
     #expect(runner.calls.count == 3)
     let storage2 = ResetStorage()
     let again = PermissionResetAfterUpdate(processes: ResetRunner(storage: storage2), storage: storage2,
                                            buildID: { "x" }, logger: .noop)
-    let sync = await Task.detached { again.run(enabled: true, channel: "stable", environment: [:], arguments: []) as Bool }.value
+    let sync = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+        DispatchQueue.global().async {
+            continuation.resume(returning: again.run(enabled: true, channel: "stable", environment: [:], arguments: []) as Bool)
+        }
+    }
     #expect(sync)
 }
 

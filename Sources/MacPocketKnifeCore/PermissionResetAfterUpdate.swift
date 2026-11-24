@@ -119,7 +119,8 @@ public struct PermissionResetAfterUpdate: Sendable {
         // stream. The caller stops waiting at the deadline; a straggler is abandoned.
         let (stream, continuation) = AsyncStream<Bool?>.makeStream()
         for service in Self.services {
-            Task.detached {
+            // Dispatch threads, not the cooperative pool: these calls block.
+            DispatchQueue.global(qos: .userInitiated).async {
                 let ok: Bool
                 do {
                     try processes.run("/usr/bin/tccutil",
