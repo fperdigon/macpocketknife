@@ -1,0 +1,11 @@
+# SwiftPM is not configured: Package.swift has no external dependencies.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns:
+          - "*"

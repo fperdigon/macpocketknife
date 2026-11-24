@@ -65,6 +65,27 @@ for kind in '' 'RSA ' 'EC ' 'OPENSSH ' 'ENCRYPTED '; do
     printf '%s%s%s\n' '-----BEGIN ' "$kind" 'PRIVATE KEY-----' > 'test fixture.txt'
     expect_rejection
 done
+# Other credential shapes, each built from fragments at runtime.
+rep() { # rep CHAR COUNT
+    awk -v c="$1" -v n="$2" 'BEGIN { for (i = 0; i < n; i++) printf "%s", c; printf "\n" }'
+}
+alnum36=$(rep 'a1' 18)
+check_shape() {
+    printf '%s\n' "$token" > 'test fixture.txt'
+    expect_rejection
+}
+for prefix in 'gh''p_' 'gh''o_' 'gh''s_' 'gh''u_' 'gh''r_'; do
+    token="$prefix$alnum36"; check_shape
+done
+token="github""_pat_$(rep 'Ab3' 10)"; check_shape
+token="AK""IA$(rep 'Q7' 8)"; check_shape
+token="xo""xb-123456789012-$(rep 'z9' 6)"; check_shape
+token="AI""za$(rep 'Xy_' 12)"; check_shape
+token="ey""J$(rep 'a1' 6).ey""J$(rep 'b2' 6).$(rep 'c3' 8)"; check_shape
+# Near misses must stay clean.
+token='ghp_short'
+printf '%s\n' "$token" 'AKIA-too-short' 'eyJ.only.two' > 'test fixture.txt'
+scan
 printf '%s\n' 'Battery at 50%; sleep is blocked.' > 'test fixture.txt'
 scan
 printf '%s\n' 'Secret scanner tests passed.'

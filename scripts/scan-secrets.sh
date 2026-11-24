@@ -26,7 +26,16 @@ if [ ! -f "$allowlist" ]; then
     exit 2
 fi
 
-pattern='[0-9]{5,}:[A-Za-z0-9_-]{20,}|Bearer[[:space:]]+[A-Za-z0-9._~+/-]+=*|-----BEGIN ([A-Z0-9]+ )*PRIVATE KEY-----'
+# Telegram bot tokens, bearer tokens, PEM private keys, GitHub tokens, AWS access keys,
+# Slack tokens, Google API keys and JWTs.
+pattern='[0-9]{5,}:[A-Za-z0-9_-]{20,}'
+pattern="$pattern|Bearer[[:space:]]+[A-Za-z0-9._~+/-]+=*"
+pattern="$pattern|-----BEGIN ([A-Z0-9]+ )*PRIVATE KEY-----"
+pattern="$pattern|gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,}"
+pattern="$pattern|(AKIA|ASIA)[0-9A-Z]{16}"
+pattern="$pattern|xox[baprs]-[A-Za-z0-9-]{10,}"
+pattern="$pattern|AIza[0-9A-Za-z_-]{35}"
+pattern="$pattern|eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"
 status=0
 matches=$(git grep --no-ext-grep --no-textconv -a -h -o -i -E "$pattern" -- . ':!scripts/scan-secrets.sh') || status=$?
 case "$status" in
