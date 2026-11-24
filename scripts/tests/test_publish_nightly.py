@@ -65,7 +65,7 @@ case "$2" in
 esac
 """)
         self.env = dict(os.environ, PATH=f"{self.tmp / 'tools'}:{os.environ['PATH']}",
-                        GITHUB_SHA=SHA, KEEP_NIGHTLIES="2", CALL_LOG=str(self.tmp / "calls"),
+                        GITHUB_SHA=SHA, GITHUB_REF="refs/heads/main", KEEP_NIGHTLIES="2", CALL_LOG=str(self.tmp / "calls"),
                         PUBLISHED=str(self.tmp / "published"))
 
     def tool(self, name, content):
@@ -99,6 +99,11 @@ esac
         self.publish(ALREADY_EXISTS="1")
         self.assertNotIn("create", (self.tmp / "calls").read_text())
         self.assertTrue(self.dmg.exists())
+
+    def test_refuses_to_publish_from_other_refs(self):
+        for ref in ("refs/heads/feature", "refs/tags/v1.0.0", "refs/pull/1/merge"):
+            self.publish(expected=2, GITHUB_REF=ref)
+        self.assertFalse((self.tmp / "calls").exists())
 
     def test_invalid_retention_fails_before_publishing(self):
         for value in ("0", "-1", "invalid", "08"):

@@ -24,6 +24,11 @@
 # Needs: gh (authenticated via GH_TOKEN), GITHUB_SHA, a full git checkout, dist/*.dmg.
 set -euo pipefail
 
+# Nightlies are published only from main, never from other branches, tags or pull requests.
+if [ "${GITHUB_REF:-}" != "refs/heads/main" ]; then
+  echo "Refusing to publish a nightly from ${GITHUB_REF:-an unknown ref}; only refs/heads/main may." >&2
+  exit 2
+fi
 KEEP_NIGHTLIES="${KEEP_NIGHTLIES:-1}"
 if ! [[ "$KEEP_NIGHTLIES" =~ ^[1-9][0-9]*$ ]]; then
   echo 'KEEP_NIGHTLIES must be a positive integer.' >&2
