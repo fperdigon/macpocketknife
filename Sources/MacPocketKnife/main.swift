@@ -34,6 +34,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         },
         skipVersion: { [unowned self] in settings.settings.skippedVersion = $0 },
         beforeQuit: { [unowned self] in
+            await screenRecording.stopAndWait()
+            await audioRecording.stopAndWait()
             // The controller saves every state change. Re-save the current deadline and flush
             // before quitting so the replacement restores precisely the same assertion state.
             let defaults = UserDefaults.standard
@@ -50,9 +52,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var dictation = DictationController.make(
         speech: AppleSpeechTranscriber(), pasteboard: SystemPasteboard(), notices: localNotifier
     )
+    private let recordingGate = RecordingSessionGate()
+    private lazy var audioRecording = AudioRecordingController(
+        factory: AudioRecordingFactoryImpl(), disk: RecordingDiskSpace(), files: RecordingFiles(),
+        scheduler: KeepAwakeScheduler(), notices: localNotifier, gate: recordingGate
+    )
     private lazy var screenRecording = ScreenRecordingController.make(
         factory: RecordingFactory(), displays: RecordingDisplays(), picker: RecordingPicker(), permission: ScreenRecordingPermission(),
-        disk: RecordingDiskSpace(), files: RecordingFiles(), notices: localNotifier
+        disk: RecordingDiskSpace(), files: RecordingFiles(), notices: localNotifier, gate: recordingGate
     )
     private var isTerminating = false
     private var terminationReplied = false
@@ -62,12 +69,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var hotkeyPreferences: String?
     private var engine: AssistantEngine?
     private var settingsWindow: SettingsWindowController?
+    private var audioOptionsWindow: AudioRecordingOptionsWindowController?
     private var recordingOptionsWindow: RecordingOptionsWindowController?
     private let statusLine = NSMenuItem(title: "Reading power state…", action: nil, keyEquivalent: "")
     private let blockersLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let keepAwake = NSMenuItem(title: "Keep awake", action: nil, keyEquivalent: "")
     private let keepUnlocked = NSMenuItem(title: "Keep unlocked", action: nil, keyEquivalent: "")
     private let dictate = NSMenuItem(title: "Dictate", action: nil, keyEquivalent: "")
+    private let recordAudio = NSMenuItem(title: "Record audio…", action: nil, keyEquivalent: "")
     private let recordScreen = NSMenuItem(title: "Record screen…", action: nil, keyEquivalent: "")
     private let authorization = NSMenuItem(title: "Notifications: checking…", action: nil, keyEquivalent: "")
 
@@ -138,6 +147,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         recordScreen.target = self
         recordScreen.action = #selector(toggleScreenRecording)
         menu.addItem(recordScreen)
+        recordAudio.target = self
+        recordAudio.action = #selector(toggleAudioRecording)
+        menu.addItem(recordAudio)
         let recordings = NSMenuItem(title: "Show recordings in Finder", action: #selector(showRecordings), keyEquivalent: "")
         recordings.target = self
         menu.addItem(recordings)
@@ -162,6 +174,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         dictation.onChange = { [weak self] in self?.refreshStatus() }
         QuitSelfTest.trace("dictation wiring done")
+        audioRecording.onChange = { [weak self] in self?.refreshStatus() }
         screenRecording.onChange = { [weak self] in self?.refreshStatus() }
         QuitSelfTest.trace("screen recording wiring done")
         hotkey.actions[1] = { [weak self] in self?.toggleDictation() }
@@ -220,12 +233,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if isTerminating { return .terminateLater }
-        switch screenRecording.state {
-        case .idle, .error:
-            return .terminateNow
-        case .starting, .recording, .stopping:
-            break
-        }
+        let screenIdle = screenRecording.state == .idle || screenRecording.state == .error
+        let audioIdle = audioRecording.state == .idle || audioRecording.state == .error
+        if screenIdle && audioIdle { return .terminateNow }
         isTerminating = true
         // terminate() can nest AppKit's modal loop inside a main-queue callback.
         // Main-actor tasks may then starve; a common-mode timer still fires.
@@ -236,6 +246,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         RunLoop.main.add(watchdog, forMode: .common)
         Task { @MainActor in
             await screenRecording.stopAndWait()
+            await audioRecording.stopAndWait()
             finishTermination(sender)
         }
         return .terminateLater
@@ -283,9 +294,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         recordScreen.title = screenLabel + screenShortcut
         recordScreen.state = screenBusy ? .on : .off
         recordScreen.isEnabled = screenRecording.state != .stopping
+        let audioActive = audioRecording.state == .recording
+        let audioBusy = audioActive || audioRecording.state == .starting || audioRecording.state == .stopping
+        recordAudio.title = audioBusy ? "Stop audio recording" : "Record audio…"
+        recordAudio.state = audioBusy ? .on : .off
+        recordAudio.isEnabled = audioRecording.state != .stopping
         var indicators = recording ? " ●" : ""
         if screenActive { indicators += " ⏺ " + screenRecording.elapsedTitle }
-        statusItem?.length = (recording || screenActive) ? NSStatusItem.variableLength : NSStatusItem.squareLength
+        if audioActive { indicators += " ⏺ " + audioRecording.elapsedTitle }
+        statusItem?.length = (recording || screenActive || audioActive) ? NSStatusItem.variableLength : NSStatusItem.squareLength
         statusItem?.button?.attributedTitle = NSAttributedString(
             string: indicators, attributes: [.foregroundColor: NSColor.systemRed]
         )
@@ -374,6 +391,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 }
             }
             recordingOptionsWindow?.show()
+        }
+    }
+
+    @objc private func toggleAudioRecording() {
+        switch audioRecording.state {
+        case .starting, .recording, .stopping:
+            audioRecording.toggle(settings: settings.settings)
+        case .idle, .error:
+            // Rebuild to reflect the result of the most recent capture permission attempt.
+            audioOptionsWindow?.close()
+            audioOptionsWindow = AudioRecordingOptionsWindowController(model: settings,
+                screenPermissionDenied: audioRecording.screenPermissionDenied) { [weak self] in
+                    guard let self else { return }
+                    self.audioRecording.toggle(settings: self.settings.settings)
+                }
+            audioOptionsWindow?.show()
         }
     }
 

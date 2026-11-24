@@ -44,6 +44,8 @@ public final class ScreenRecordingController {
             return task
         }
     }
+    private let gate: RecordingSessionGate?
+    private var gateToken: UUID?
     private let factory: any ScreenRecordingFactory
     private let displays: any ScreenRecordingDisplayProviding
     private let picker: any ScreenRecordingPicking
@@ -69,17 +71,19 @@ public final class ScreenRecordingController {
     public static func make(
         factory: any ScreenRecordingFactory, displays: any ScreenRecordingDisplayProviding,
         picker: any ScreenRecordingPicking, permission: any ScreenRecordingPermissionProviding,
-        disk: any FreeDiskSpaceProviding, files: any RecordingFileManaging, notices: any AlertNotifying
+        disk: any FreeDiskSpaceProviding, files: any RecordingFileManaging, notices: any AlertNotifying,
+        gate: RecordingSessionGate? = nil
     ) -> ScreenRecordingController {
         ScreenRecordingController(factory: factory, displays: displays, picker: picker,
                                   permission: permission, disk: disk, files: files,
-                                  scheduler: KeepAwakeScheduler(), notices: notices)
+                                  scheduler: KeepAwakeScheduler(), notices: notices, gate: gate)
     }
 
     public init(factory: any ScreenRecordingFactory, displays: any ScreenRecordingDisplayProviding,
                 picker: any ScreenRecordingPicking, permission: any ScreenRecordingPermissionProviding,
                 disk: any FreeDiskSpaceProviding, files: any RecordingFileManaging,
-                scheduler: any KeepAwakeScheduling, notices: any AlertNotifying) {
+                scheduler: any KeepAwakeScheduling, notices: any AlertNotifying, gate: RecordingSessionGate? = nil) {
+        self.gate = gate
         self.factory = factory
         self.displays = displays
         self.picker = picker
@@ -126,6 +130,10 @@ public final class ScreenRecordingController {
     }
 
     private func start(settings: AppSettings, target: ScreenRecordingTarget?) {
+        if let gate {
+            guard let token = gate.acquire() else { report(.recordingBusy); return }
+            gateToken = token
+        }
         lastError = nil
         lastNotice = nil
         lastSavedFiles = []
@@ -147,6 +155,7 @@ public final class ScreenRecordingController {
         operation = Task { [self] in
             do {
                 guard !stopRequested else {
+                    releaseGate()
                     state = .idle
                     onChange?()
                     return
@@ -157,6 +166,7 @@ public final class ScreenRecordingController {
                     if picker.isSupported {
                         content = try await picker.chooseContent()
                         guard content != nil, !stopRequested else {
+                            releaseGate()
                             state = .idle
                             onChange?()
                             return
@@ -169,6 +179,7 @@ public final class ScreenRecordingController {
                 var selected: [DisplayInfo?] = [nil]
                 if content == nil {
                     guard let resolution = try ScreenRecordingTargets.resolve(requested, displays: displays.connectedDisplays()) else {
+                        releaseGate()
                         state = .idle
                         onChange?()
                         return
@@ -315,9 +326,15 @@ public final class ScreenRecordingController {
         let duration = startedAt.map { max(0, scheduler.now.timeIntervalSince($0)) } ?? 0
         AppLog.shared.info(category: "recording", "Stopped durationSeconds=\(Int(duration)) fileCount=\(lastSavedFiles.count)")
         sessions = []
+        releaseGate()
         startedAt = nil
         state = .idle
         if let finalFailure { report(finalFailure) } else { onChange?() }
+    }
+
+    private func releaseGate() {
+        if let gateToken { gate?.release(gateToken) }
+        gateToken = nil
     }
 
     private func report(_ failure: ScreenRecordingFailure) {

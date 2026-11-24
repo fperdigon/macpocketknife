@@ -164,6 +164,23 @@ and `AUDIO NOT CAPTURED` distinguish it from permission (10), usage (2), or othe
 capture/correlation failures (1). Hosted VM audio support remains unproven; silence
 is a failure, never a skipped or successful test.
 
+## Audio recording tests
+
+Audio Core tests inject recorder, clock/scheduler, file/disk, notice and settings
+inputs. They cover source validation, migration, microphone fallback, cancellation,
+writer failure, disk exhaustion, and mutual exclusion with screen recording.
+Run `CI=1 swift test --disable-sandbox --enable-code-coverage`; new Audio Core
+sources should retain at least 80% line coverage. No permission or hardware access
+is needed. The screen recording harness is intentionally unchanged.
+
+Manual audio checks require a logged-in GUI session and explicit permission:
+record system audio, microphone only (macOS 15+), and both sources; inspect the
+result for one AAC audio track and no video, audible mixing, elapsed time, save
+notification Finder action, collision-safe naming, and finalization on quit/update.
+Check denied microphone fallback and denied Screen Recording guidance. On macOS
+13/14 verify the microphone-unavailable explanation and system-only recording.
+Do not reset TCC or modify a developer's settings as part of automated tests.
+
 ## Code style and tests
 
 Follow nearby sources: four-space indentation, Swift naming conventions,

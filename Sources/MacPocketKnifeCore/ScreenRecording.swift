@@ -101,10 +101,13 @@ public struct ScreenRecordingConfiguration: Equatable, Sendable {
 }
 
 public enum ScreenRecordingFailure: Error, Equatable, Sendable {
-    case permissionDenied, microphoneDenied, lowDiskSpace, noDisplay, captureFailed, writingFailed, folderUnavailable
+    case microphoneUnavailable, noAudioSources, recordingBusy, permissionDenied, microphoneDenied, lowDiskSpace, noDisplay, captureFailed, writingFailed, folderUnavailable
 
     public var message: String {
         switch self {
+        case .microphoneUnavailable: return "No microphone could be started. Microphone capture requires macOS 15 or later and an available input device. Enable System audio to record without it."
+        case .noAudioSources: return "Enable Microphone or System audio before starting an audio recording."
+        case .recordingBusy: return "Another audio or screen recording is active. Stop it before starting a new recording."
         case .permissionDenied:
             return "Allow access in System Settings > Privacy & Security > Screen & System Audio Recording, then relaunch the app if needed."
         case .microphoneDenied:
@@ -167,7 +170,7 @@ public enum ScreenRecordingFiles {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Movies/MacPocketKnife").path
     }
 
-    public static func name(date: Date, timeZone: TimeZone = .current, collision: Int = 1, displayName: String? = nil) -> String {
+    public static func name(date: Date, timeZone: TimeZone = .current, collision: Int = 1, displayName: String? = nil, audioOnly: Bool = false) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.calendar = Calendar(identifier: .gregorian)
@@ -175,15 +178,17 @@ public enum ScreenRecordingFiles {
         formatter.dateFormat = "yyyy-MM-dd HH.mm.ss"
         let suffix = collision > 1 ? " \(collision)" : ""
         let displaySuffix = displayName.map { " - " + sanitizedDisplayName($0) } ?? ""
-        return "Screen \(formatter.string(from: date))\(displaySuffix)\(suffix).mp4"
+        let prefix = audioOnly ? "Audio" : "Screen"
+        let ext = audioOnly ? "m4a" : "mp4"
+        return "\(prefix) \(formatter.string(from: date))\(displaySuffix)\(suffix).\(ext)"
     }
 
-    public static func destination(date: Date, folder: URL, displayName: String? = nil, exists: (URL) -> Bool) -> URL {
+    public static func destination(date: Date, folder: URL, displayName: String? = nil, audioOnly: Bool = false, exists: (URL) -> Bool) -> URL {
         var collision = 1
-        var file = folder.appendingPathComponent(name(date: date, collision: collision, displayName: displayName))
+        var file = folder.appendingPathComponent(name(date: date, collision: collision, displayName: displayName, audioOnly: audioOnly))
         while exists(file) {
             collision += 1
-            file = folder.appendingPathComponent(name(date: date, collision: collision, displayName: displayName))
+            file = folder.appendingPathComponent(name(date: date, collision: collision, displayName: displayName, audioOnly: audioOnly))
         }
         return file
     }

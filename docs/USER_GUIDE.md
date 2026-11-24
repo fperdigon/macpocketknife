@@ -86,6 +86,48 @@ notifications contain only a word count. Clipboard managers and Universal Clipbo
 may retain or sync that text outside the app. Replace or clear your clipboard when
 finished if the text is sensitive.
 
+## Audio recording
+
+Choose **Record audio…** directly below **Record screen…**. In the small options
+window, select **Microphone**, **System audio**, or both, then press **Start
+recording**. Both toggles default on and persist between sessions. At least one
+source must be enabled. There is no global audio recording shortcut.
+
+Microphone capture requires macOS 15 or later and an available input device.
+On macOS 13/14, enable **System audio**; microphone capture is unavailable.
+If the microphone is denied or cannot start, a recording with system audio
+continues and the saved notice explains the fallback. A microphone-only attempt
+fails if the microphone is unavailable, rather than saving a silent session.
+
+The **Permissions** section reuses the microphone authorization controls. A button
+appears only while microphone permission is missing. ScreenCaptureKit needs Screen
+Recording permission, including for its microphone-only stream, but macOS cannot
+reliably report that status in advance. The window shows a neutral explanation;
+**Open Screen Recording settings** appears only after a start attempt reports a
+denial. Allow access in **System Settings > Privacy & Security > Screen & System
+Audio Recording** (called **Screen Recording** on older macOS), then retry. A
+relaunch may be necessary. The options window takes no screenshots.
+
+While recording, the menu item becomes **Stop audio recording** and the menu bar
+shows a red recording indicator with elapsed time. Stop to finalize one AAC file
+with one mixed audio track: 48 kHz stereo at approximately 128 kbps. No video track
+is saved. Microphone and system audio are mixed locally from memory-only PCM
+buffers; the app excludes its own system audio.
+
+Files are named `Audio YYYY-MM-DD HH.MM.SS.m4a`, with a numbered suffix for
+collisions, in the same folder selected in **Settings > Tools > Screen recording**.
+The default is `~/Movies/MacPocketKnife`. **Show recordings in Finder** opens that
+folder for audio and video. The **Audio recording saved** notification includes
+**Show in Finder** to select the saved file. Temporary `.Recording-<uuid>.m4a`
+files are renamed atomically after finalization. At least 1 GB of free space is
+required to start, and critically low space stops and finalizes capture.
+
+Only one audio or screen recording can run at a time, including startup and
+finalization. A second start shows a notice asking you to stop the current one.
+Quitting or installing an update stops and finalizes audio as it does video.
+Audio recording does not keep the Mac awake. System sharing controls, sleep,
+device changes, or capture errors may end a session early.
+
 ## Screen recording
 
 Choose **Record screen…** below **Dictate** to open the **Screen Recording**

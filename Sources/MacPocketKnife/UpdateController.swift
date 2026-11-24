@@ -20,7 +20,7 @@ import MacPocketKnifeCore
 final class UpdateController: NSObject {
     private let preferences: () -> UpdatePreferences
     private let skipVersion: (String) -> Void
-    private let beforeQuit: () -> Void
+    private let beforeQuit: @MainActor () async -> Void
     private let checker: any UpdateChecking
     private let downloader: any UpdateDownloading
     private let installer: UpdateInstaller
@@ -31,7 +31,7 @@ final class UpdateController: NSObject {
     private var progressLabel: NSTextField?
 
     init(preferences: @escaping () -> UpdatePreferences, skipVersion: @escaping (String) -> Void,
-         beforeQuit: @escaping () -> Void, checker: any UpdateChecking = UpdateChecker(),
+         beforeQuit: @escaping @MainActor () async -> Void, checker: any UpdateChecking = UpdateChecker(),
          downloader: any UpdateDownloading = UpdateDownloader(), installer: UpdateInstaller = UpdateInstaller(),
          defaults: UserDefaults = .standard, policy: UpdateCheckPolicy = UpdateCheckPolicy()) {
         self.preferences = preferences
@@ -120,7 +120,7 @@ final class UpdateController: NSObject {
                 try installer.install(dmg: dmg, expectedDigest: update.asset.digest, over: app, work: work)
             }.value
             let helper = UpdateInstaller.relaunchProcess(appURL: app)
-            beforeQuit()
+            await beforeQuit()
             try helper.run()
             AppLog.shared.info(category: "update", "Relaunch scheduled tag=\(update.release.tag)")
             // Schedule before terminate(), which may enter a nested modal loop.

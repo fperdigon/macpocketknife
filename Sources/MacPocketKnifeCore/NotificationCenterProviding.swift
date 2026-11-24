@@ -13,6 +13,7 @@
 // limitations under the License.
 
 @preconcurrency import UserNotifications
+@preconcurrency import AppKit
 
 public enum AuthorizationState: Sendable, Equatable {
     case notDetermined
@@ -35,6 +36,10 @@ struct SystemNotificationCenterProvider: NotificationCenterProviding {
 
     init() {
         center = .current()
+        center.delegate = RecordingNotificationDelegate.shared
+        let action = UNNotificationAction(identifier: "show-recording", title: "Show in Finder", options: [.foreground])
+        let category = UNNotificationCategory(identifier: "recording-saved", actions: [action], intentIdentifiers: [])
+        center.setNotificationCategories([category])
     }
 
     func authorizationStatus() async -> AuthorizationState {
@@ -53,5 +58,20 @@ struct SystemNotificationCenterProvider: NotificationCenterProviding {
 
     func add(_ request: UNNotificationRequest) async throws {
         try await center.add(request)
+    }
+}
+
+/// The notification center keeps its delegate weakly; retain it for the app lifetime.
+private final class RecordingNotificationDelegate: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
+    static let shared = RecordingNotificationDelegate()
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        if response.actionIdentifier == "show-recording",
+           let path = response.notification.request.content.userInfo["recordingFile"] as? String {
+            Task { @MainActor in
+                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+            }
+        }
+        completionHandler()
     }
 }

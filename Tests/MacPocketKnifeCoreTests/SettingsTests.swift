@@ -265,3 +265,14 @@ func appSettingsValidationHandlesNonfiniteDuration(duration: Double) {
     #expect(previous.changedKeys(from: updated) == updated.changedKeys(from: previous))
     #expect(previous.changedKeys(from: previous).isEmpty)
 }
+
+@Test @MainActor func audioOptionsPersistThroughSettingsModel() {
+    let store = InMemorySettingsStore()
+    let model = SettingsModel(store: store, secrets: InMemorySecretStore())
+    model.settings.audioRecordingMicrophone = false
+    model.settings.audioRecordingSystemAudio = false
+    let restored = SettingsModel(store: store, secrets: InMemorySecretStore())
+    #expect(!restored.settings.audioRecordingMicrophone)
+    #expect(!restored.settings.audioRecordingSystemAudio)
+    #expect(store.saveCount >= 2)
+}
