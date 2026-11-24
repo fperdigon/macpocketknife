@@ -202,6 +202,51 @@ private struct FailingLogFileSystem: LogFileSystem {
     #expect(!AppLogger.noop.hasFileError)
 }
 
+private final class FlakyLogFileSystem: LogFileSystem, @unchecked Sendable {
+    let inner = LocalLogFileSystem()
+    private let lock = NSLock()
+    private var failing = true
+    func setFailing(_ value: Bool) { lock.lock(); failing = value; lock.unlock() }
+    private var isFailing: Bool { lock.lock(); defer { lock.unlock() }; return failing }
+    func createDirectory(at url: URL) throws { try inner.createDirectory(at: url) }
+    func contents(of url: URL) throws -> [URL] { try inner.contents(of: url) }
+    func attributes(at url: URL) throws -> [FileAttributeKey: Any] { try inner.attributes(at: url) }
+    func append(_ data: Data, to url: URL) throws {
+        if isFailing { throw CocoaError(.fileWriteUnknown) }
+        try inner.append(data, to: url)
+    }
+    func remove(at url: URL) throws { try inner.remove(at: url) }
+}
+
+@Test func loggerRecoversAfterWriteErrorWithBackoff() throws {
+    let fixture = try LogTestFixture()
+    defer { fixture.cleanup() }
+    let flaky = FlakyLogFileSystem()
+    let logger = AppLogger(directory: fixture.directory, fileSystem: flaky,
+                           clock: { fixture.clock.now() }, calendar: fixture.calendar,
+                           mirrorToUnifiedLog: false, homeDirectory: "/Users/test-person")
+    logger.info(category: "test", "first fails")
+    #expect(logger.hasFileError)
+    #expect(logger.fileFailureCount == 1)
+    flaky.setFailing(false)
+    // Inside the backoff window nothing is retried.
+    fixture.clock.set(fixture.clock.now().addingTimeInterval(10))
+    logger.info(category: "test", "too early")
+    #expect(logger.hasFileError)
+    #expect(logger.fileFailureCount == 1)
+    fixture.clock.set(fixture.clock.now().addingTimeInterval(25))
+    logger.info(category: "test", "recovered")
+    #expect(!logger.hasFileError)
+    let text = try fixture.text()
+    #expect(text.contains("recovered"))
+    #expect(!text.contains("too early"))
+    // A failure while retrying schedules another retry.
+    flaky.setFailing(true)
+    logger.info(category: "test", "fails again")
+    #expect(logger.hasFileError)
+    #expect(logger.fileFailureCount == 2)
+}
+
 @Test func loggerRejectsSymbolicLinkAsDailyFile() throws {
     let fixture = try LogTestFixture()
     defer { fixture.cleanup() }

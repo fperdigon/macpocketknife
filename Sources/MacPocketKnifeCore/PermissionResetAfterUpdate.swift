@@ -65,13 +65,17 @@ public struct PermissionResetAfterUpdate: Sendable {
         return try LocalUpdateFileSystem().sha256(of: executable)
     }
 
+    /// Global deadline for the three concurrent resets, in seconds.
+    public static let deadline: TimeInterval = 12
+
     /// Returns true if at least one reset succeeded. Failures never prevent launch
     /// or cause repeated reset attempts on subsequent launches of the same build.
+    /// The resets run concurrently and the whole attempt is bounded by `deadline`.
     public func run(
         enabled: Bool, channel: String,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         arguments: [String] = CommandLine.arguments
-    ) -> Bool {
+    ) async -> Bool {
         guard enabled, channel != "dev",
               !Self.isTestOrCI(environment: environment, arguments: arguments) else { return false }
         let current: String
@@ -81,17 +85,71 @@ public struct PermissionResetAfterUpdate: Sendable {
             return false
         }
         guard Self.shouldReset(storedBuildID: storage.lastBuildID, currentBuildID: current) else { return false }
-        var didReset = false
+        let didReset = await resetAll(deadline: Self.deadline)
+        storage.store(buildID: current)
+        return didReset
+    }
+
+    /// Blocking compatibility wrapper for callers that are not async yet. Prefer the async
+    /// `run`; this exists so the executable target can migrate separately.
+    public func run(
+        enabled: Bool, channel: String,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        arguments: [String] = CommandLine.arguments
+    ) -> Bool {
+        let box = ResultBox()
+        let done = DispatchSemaphore(value: 0)
+        let copy = self
+        Task.detached {
+            box.value = await copy.run(enabled: enabled, channel: channel,
+                                       environment: environment, arguments: arguments) as Bool
+            done.signal()
+        }
+        done.wait()
+        return box.value
+    }
+
+    private final class ResultBox: @unchecked Sendable { var value = false }
+
+    private func resetAll(deadline: TimeInterval) async -> Bool {
+        let processes = self.processes
+        let logger = self.logger
+        let count = Self.services.count
+        // Each reset blocks a thread, so it runs on its own task and reports through a
+        // stream. The caller stops waiting at the deadline; a straggler is abandoned.
+        let (stream, continuation) = AsyncStream<Bool?>.makeStream()
         for service in Self.services {
-            do {
-                try processes.run("/usr/bin/tccutil", arguments: ["reset", service, Self.bundleIdentifier])
-                didReset = true
-                logger.info(category: "permission", "Reset permissions after update service=\(service)")
-            } catch {
-                logger.warning(category: "permission", "Permission reset failed service=\(service)")
+            Task.detached {
+                let ok: Bool
+                do {
+                    try processes.run("/usr/bin/tccutil",
+                                      arguments: ["reset", service, Self.bundleIdentifier])
+                    logger.info(category: "permission", "Reset permissions after update service=\(service)")
+                    ok = true
+                } catch {
+                    logger.warning(category: "permission", "Permission reset failed service=\(service)")
+                    ok = false
+                }
+                continuation.yield(ok)
             }
         }
-        storage.store(buildID: current)
+        let timer = Task.detached {
+            try? await Task.sleep(for: .seconds(deadline))
+            continuation.yield(nil)
+        }
+        var didReset = false
+        var finished = 0
+        for await result in stream {
+            guard let ok = result else {
+                logger.warning(category: "permission", "Permission reset deadline reached")
+                break
+            }
+            didReset = didReset || ok
+            finished += 1
+            if finished == count { break }
+        }
+        timer.cancel()
+        continuation.finish()
         return didReset
     }
 }

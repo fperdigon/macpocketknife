@@ -24,13 +24,17 @@ private final class ResetStorage: PermissionResetBuildStoring, @unchecked Sendab
 
 private final class ResetRunner: UpdateProcessRunning, @unchecked Sendable {
     let storage: ResetStorage
-    var calls: [[String]] = []
+    private let lock = NSLock()
+    private var recorded: [[String]] = []
     var failures: Set<String> = []
+    var delay: TimeInterval = 0
+    var calls: [[String]] { lock.lock(); defer { lock.unlock() }; return recorded }
     init(storage: ResetStorage) { self.storage = storage }
     func run(_ executable: String, arguments: [String]) throws {
         #expect(storage.writes == 0)
         #expect(executable == "/usr/bin/tccutil")
-        calls.append(arguments)
+        lock.lock(); recorded.append(arguments); lock.unlock()
+        if delay > 0 { Thread.sleep(forTimeInterval: delay) }
         if failures.contains(arguments[1]) { throw CocoaError(.executableLoad) }
     }
 }
@@ -42,61 +46,78 @@ private final class ResetRunner: UpdateProcessRunning, @unchecked Sendable {
     #expect(!PermissionResetAfterUpdate.shouldReset(storedBuildID: nil, currentBuildID: ""))
 }
 
-@Test func permissionResetAttemptsOnlyOwnServicesThenStores() {
+@Test func permissionResetAttemptsOnlyOwnServicesThenStores() async {
     let storage = ResetStorage()
     let runner = ResetRunner(storage: storage)
     let reset = PermissionResetAfterUpdate(processes: runner, storage: storage, buildID: { "new" }, logger: .noop)
-    #expect(reset.run(enabled: true, channel: "nightly", environment: [:], arguments: []))
-    #expect(runner.calls == PermissionResetAfterUpdate.services.map {
+    #expect(await reset.run(enabled: true, channel: "nightly", environment: [:], arguments: []))
+    #expect(runner.calls.sorted { $0[1] < $1[1] } == PermissionResetAfterUpdate.services.sorted().map {
         ["reset", $0, "io.github.fperdigon.macpocketknife"]
     })
     #expect(storage.lastBuildID == "new")
     #expect(storage.writes == 1)
-    #expect(!reset.run(enabled: true, channel: "nightly", environment: [:], arguments: []))
+    #expect(await !reset.run(enabled: true, channel: "nightly", environment: [:], arguments: []))
     #expect(runner.calls.count == 3)
     #expect(storage.writes == 1)
 }
 
-@Test(arguments: [false, true]) func permissionResetFailuresStillStore(allFail: Bool) {
+@Test(arguments: [false, true]) func permissionResetFailuresStillStore(allFail: Bool) async {
     let storage = ResetStorage()
     storage.lastBuildID = "old"
     let runner = ResetRunner(storage: storage)
     runner.failures = allFail ? Set(PermissionResetAfterUpdate.services) : ["Microphone"]
     let reset = PermissionResetAfterUpdate(processes: runner, storage: storage, buildID: { "new" }, logger: .noop)
-    #expect(reset.run(enabled: true, channel: "stable", environment: [:], arguments: []) == !allFail)
+    #expect(await reset.run(enabled: true, channel: "stable", environment: [:], arguments: []) == !allFail)
     #expect(runner.calls.count == 3)
     #expect(storage.lastBuildID == "new")
     #expect(storage.writes == 1)
 }
 
-@Test func permissionResetSkipsBeforeReadingBuild() {
+@Test func permissionResetSkipsBeforeReadingBuild() async {
     let storage = ResetStorage()
     let runner = ResetRunner(storage: storage)
     let reset = PermissionResetAfterUpdate(processes: runner, storage: storage, buildID: {
         Issue.record("Skipped reset must not hash the executable")
         return "new"
     }, logger: .noop)
-    #expect(!reset.run(enabled: false, channel: "stable", environment: [:], arguments: []))
-    #expect(!reset.run(enabled: true, channel: "dev", environment: [:], arguments: []))
+    #expect(await !reset.run(enabled: false, channel: "stable", environment: [:], arguments: []))
+    #expect(await !reset.run(enabled: true, channel: "dev", environment: [:], arguments: []))
     for key in ["CI", "GITHUB_ACTIONS", "XCTestConfigurationFilePath"] {
-        #expect(!reset.run(enabled: true, channel: "stable", environment: [key: "1"], arguments: []))
+        #expect(await !reset.run(enabled: true, channel: "stable", environment: [key: "1"], arguments: []))
     }
     for argument in ["Tests.xctest", "swiftpm-testing-helper"] {
-        #expect(!reset.run(enabled: true, channel: "stable", environment: [:], arguments: [argument]))
+        #expect(await !reset.run(enabled: true, channel: "stable", environment: [:], arguments: [argument]))
     }
     #expect(runner.calls.isEmpty)
     #expect(storage.writes == 0)
 }
 
-@Test func permissionResetHashFailureSkipsAndRetriesLater() {
+@Test func permissionResetHashFailureSkipsAndRetriesLater() async {
     let storage = ResetStorage()
     let runner = ResetRunner(storage: storage)
     let reset = PermissionResetAfterUpdate(processes: runner, storage: storage, buildID: {
         throw CocoaError(.fileReadNoSuchFile)
     }, logger: .noop)
-    #expect(!reset.run(enabled: true, channel: "stable", environment: [:], arguments: []))
+    #expect(await !reset.run(enabled: true, channel: "stable", environment: [:], arguments: []))
     #expect(storage.writes == 0)
     #expect(runner.calls.isEmpty)
+}
+
+@Test func permissionResetRunsConcurrentlyAndSyncWrapperWorks() async {
+    let storage = ResetStorage()
+    let runner = ResetRunner(storage: storage)
+    runner.delay = 0.3
+    let reset = PermissionResetAfterUpdate(processes: runner, storage: storage, buildID: { "new" }, logger: .noop)
+    let start = Date()
+    #expect(await reset.run(enabled: true, channel: "stable", environment: [:], arguments: []))
+    // Three serial 0.3 s resets would take at least 0.9 s.
+    #expect(Date().timeIntervalSince(start) < 0.85)
+    #expect(runner.calls.count == 3)
+    let storage2 = ResetStorage()
+    let again = PermissionResetAfterUpdate(processes: ResetRunner(storage: storage2), storage: storage2,
+                                           buildID: { "x" }, logger: .noop)
+    let sync = await Task.detached { again.run(enabled: true, channel: "stable", environment: [:], arguments: []) as Bool }.value
+    #expect(sync)
 }
 
 @Test func permissionResetDefaultsStorage() throws {

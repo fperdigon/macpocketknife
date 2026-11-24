@@ -153,12 +153,29 @@ public final class AppLogger: @unchecked Sendable {
     private var currentName: String?
     private var capWarningWritten = false
     private var fileError = false
+    private var failureCount = 0
+    private var nextRetry = Date.distantPast
+    /// Minimum seconds between attempts to reopen the log file after a failure.
+    static let retryInterval: TimeInterval = 30
 
-    /// True after the first file-system failure. No error is propagated to the app.
+    /// True while the last file-system operation failed. No error is propagated to the app.
     public var hasFileError: Bool {
         lock.lock()
         defer { lock.unlock() }
         return fileError
+    }
+
+    /// Total number of file-system failures seen so far (never includes message content).
+    public var fileFailureCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return failureCount
+    }
+
+    private func recordFailure(at date: Date) {
+        fileError = true
+        failureCount += 1
+        nextRetry = date.addingTimeInterval(Self.retryInterval)
     }
 
     public init(
@@ -203,6 +220,12 @@ public final class AppLogger: @unchecked Sendable {
         let safeCategory = sanitize(category)
         let safeMessage = sanitize(message)
         mirror(level, category: safeCategory, message: safeMessage)
+        if fileError {
+            // Drop the broken state and retry, but not more than once per interval.
+            guard now >= nextRetry else { return }
+            fileError = false
+            currentName = nil
+        }
         prepareDay(now)
         guard !fileError, let name = currentName else { return }
         let url = folder.url.appendingPathComponent(name)
@@ -228,7 +251,7 @@ public final class AppLogger: @unchecked Sendable {
             guard newSize <= hardLimit, UInt64(data.count) <= hardLimit - newSize else { return }
             try fileSystem.append(data, to: url)
         } catch {
-            fileError = true
+            recordFailure(at: now)
         }
     }
 
@@ -246,7 +269,7 @@ public final class AppLogger: @unchecked Sendable {
                 try fileSystem.remove(at: folder.url.appendingPathComponent(file.name))
             }
         } catch {
-            fileError = true
+            recordFailure(at: date)
         }
     }
 

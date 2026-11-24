@@ -75,13 +75,15 @@ public final class TelegramSetupFlow {
 
     /// Discards the existing backlog, then accepts only a new, exact /start command.
     /// The deadline cancels in-flight transport requests as well as polling sleeps.
-    public func discoverChatID(timeout: TimeInterval = 60) async throws -> Int64 {
+    /// When `expectedStartCode` is set, only `/start <code>` is accepted, so a stranger who finds
+    /// the bot cannot claim ownership during setup. Without it, any exact `/start` is accepted.
+    public func discoverChatID(timeout: TimeInterval = 60, expectedStartCode: String? = nil) async throws -> Int64 {
         guard let client else { throw TelegramSetupError.notValidated }
         guard timeout.isFinite, timeout > 0 else { throw TelegramSetupError.timedOut }
         let deadline = clock.now + timeout
         return try await withThrowingTaskGroup(of: Int64.self) { group in
             group.addTask {
-                try await self.poll(client: client, deadline: deadline)
+                try await self.poll(client: client, deadline: deadline, expectedText: Self.startText(expectedStartCode))
             }
             group.addTask {
                 try await self.waitForDeadline(deadline)
@@ -97,7 +99,12 @@ public final class TelegramSetupFlow {
         throw TelegramSetupError.timedOut
     }
 
-    private func poll(client: TelegramClient, deadline: TimeInterval) async throws -> Int64 {
+    static func startText(_ code: String?) -> String {
+        guard let code, !code.isEmpty else { return "/start" }
+        return "/start " + code
+    }
+
+    private func poll(client: TelegramClient, deadline: TimeInterval, expectedText: String) async throws -> Int64 {
         try Task.checkCancellation()
         // Negative offset fetches the last pending update and forgets earlier backlog.
         let backlog = try await client.getUpdates(offset: -1)
@@ -110,7 +117,7 @@ public final class TelegramSetupFlow {
                 offset.map { update.updateID >= $0 } ?? true
             }
             offset = try nextOffset(updates, after: offset)
-            if let message = fresh.compactMap(\.message).first(where: { $0.text == "/start" }) {
+            if let message = fresh.compactMap(\.message).first(where: { $0.text == expectedText }) {
                 return message.chatID
             }
             try await clock.sleep(for: min(1, max(0, deadline - clock.now)))
