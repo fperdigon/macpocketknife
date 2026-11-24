@@ -30,8 +30,12 @@ public final class UserDefaultsSettingsStore: SettingsStore {
     }
 
     public func load() -> AppSettings {
-        guard let data = defaults.data(forKey: Self.storageKey),
-              let settings = try? JSONDecoder().decode(AppSettings.self, from: data) else {
+        guard let data = defaults.data(forKey: Self.storageKey) else { return AppSettings() }
+        guard let settings = try? JSONDecoder().decode(AppSettings.self, from: data) else {
+            // Keep the unreadable payload so the next save cannot destroy it.
+            let stamp = Int(Date().timeIntervalSince1970)
+            defaults.set(data, forKey: "\(Self.storageKey).corrupt-\(stamp)")
+            AppLog.shared.warning(category: "settings", "Settings unreadable; backed up and using defaults")
             return AppSettings()
         }
         return settings.validated()

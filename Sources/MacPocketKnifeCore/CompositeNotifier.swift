@@ -13,15 +13,27 @@
 // limitations under the License.
 
 public struct CompositeNotifier: AlertNotifying {
-    private let channels: [any AlertNotifying]
+    public typealias RemoteDispatch = @Sendable (@escaping @Sendable () async -> Void) -> Void
 
-    public init(channels: [any AlertNotifying]) {
+    private let channels: [any AlertNotifying]
+    private let dispatchRemote: RemoteDispatch
+
+    /// Remote channels run fire-and-forget so a slow network can never stall callers.
+    public init(
+        channels: [any AlertNotifying],
+        dispatchRemote: @escaping RemoteDispatch = { work in Task.detached { await work() } }
+    ) {
         self.channels = channels
+        self.dispatchRemote = dispatchRemote
     }
 
     public func deliver(_ notice: Notice) async {
+        let local = channels.filter { !$0.deliversRemotely }
+        for channel in channels where channel.deliversRemotely {
+            dispatchRemote { await channel.deliver(notice) }
+        }
         await withTaskGroup(of: Void.self) { group in
-            for channel in channels {
+            for channel in local {
                 group.addTask { await channel.deliver(notice) }
             }
         }

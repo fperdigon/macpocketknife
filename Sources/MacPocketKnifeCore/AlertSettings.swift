@@ -37,4 +37,19 @@ public struct AlertSettings: Codable, Sendable, Equatable {
         self.urgentInterval = urgentInterval.isFinite ? max(1, urgentInterval) : 120
         self.criticalInterval = criticalInterval.isFinite ? max(1, criticalInterval) : 60
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case urgentBelowPercent, criticalBelowPercent, normalInterval, urgentInterval, criticalInterval
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            urgentBelowPercent: container.lenient(Int.self, .urgentBelowPercent) ?? 50,
+            criticalBelowPercent: container.lenient(Int.self, .criticalBelowPercent) ?? 20,
+            normalInterval: container.lenient(TimeInterval.self, .normalInterval) ?? 600,
+            urgentInterval: container.lenient(TimeInterval.self, .urgentInterval) ?? 120,
+            criticalInterval: container.lenient(TimeInterval.self, .criticalInterval) ?? 60
+        )
+    }
 }
