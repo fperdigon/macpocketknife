@@ -154,8 +154,17 @@ No update network access occurs except during a check or installation.
 Requests include ordinary HTTP connection metadata; no device identifiers,
 preferences, battery state, credentials, or telemetry are sent. The selected
 channel, skipped release, and last check time stay in local preferences.
-The updater verifies GitHub's SHA-256 digest when supplied, bundle identity,
-and the app's code signature before replacing the installed app.
+Before replacing the installed app, the updater checks: the download comes over
+HTTPS from `github.com`; the file matches a SHA-256 digest (GitHub's asset digest, or
+the release's `.sha256` file; with neither, installation is refused); the mounted
+app is not a symbolic link and has this app's bundle identifier; its version and
+build channel match the offered release and are not older than the running version
+(stable); and its ad-hoc code signature is self-consistent, with the hardened
+runtime flag and a signing identifier equal to the bundle identifier. The digest
+and the download both come from GitHub, so these checks detect corruption and
+mismatched or malformed bundles, but they do not authenticate the publisher:
+whoever controls the GitHub release can publish an update this app will accept.
+A signed-update scheme (publisher signature checked by the app) is planned.
 
 ## Removing everything
 

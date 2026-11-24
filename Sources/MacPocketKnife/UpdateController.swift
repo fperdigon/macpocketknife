@@ -110,14 +110,16 @@ final class UpdateController: NSObject {
             try? FileManager.default.removeItem(at: work)
         }
         do {
+            let digest = try await UpdateDigestResolver().resolve(asset: update.asset, in: update.release)
             let dmg = try await downloader.download(update.asset, to: work) { [weak self] fraction in
                 Task { @MainActor in self?.progressLabel?.stringValue = "Downloading… \(Int(min(1, max(0, fraction)) * 100))%" }
             }
             progressLabel?.stringValue = "Verifying and installing…"
             let app = Bundle.main.bundleURL
             let installer = installer
+            let expectation = UpdateExpectation(update: update, runningVersion: BuildInfo.current.version)
             try await Task.detached(priority: .userInitiated) {
-                try installer.install(dmg: dmg, expectedDigest: update.asset.digest, over: app, work: work)
+                try installer.install(dmg: dmg, expectedDigest: digest, expectation: expectation, over: app, work: work)
             }.value
             let helper = UpdateInstaller.relaunchProcess(appURL: app)
             await beforeQuit()
@@ -152,6 +154,9 @@ final class UpdateController: NSObject {
             case .invalidBundle: return "bundle"
             case .signatureInvalid: return "signature"
             case .operationFailed: return "file-operation"
+            case .missingDigest: return "missing-digest"
+            case .unexpectedVersion: return "unexpected-version"
+            case .unsafeBundle: return "unsafe-bundle"
             }
         }
         if error is CancellationError { return "cancelled" }

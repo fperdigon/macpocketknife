@@ -313,9 +313,14 @@ Automatic checking is on by default. It runs at launch at most once every
 background checks; a manual check can still offer it. Changing channels clears
 the skipped release.
 
-**Install and relaunch** downloads the DMG with progress, verifies GitHub's
-SHA-256 digest if one is published, mounts the image read-only, and checks the
-app's bundle identifier and code signature. Installation stages the bundle on
+**Install and relaunch** downloads the DMG over HTTPS from github.com with
+progress, requires a SHA-256 digest (GitHub's, or the release's `.sha256` file;
+without one the install is refused), mounts the image read-only, and checks that
+the app is not a symbolic link, has the right bundle identifier, matches the
+offered release's version and channel, is not a downgrade (stable), and has a
+self-consistent ad-hoc code signature. These checks do not prove who published the
+update: anyone controlling the project's GitHub releases could publish one. A
+signed-update scheme is planned. Installation stages the bundle on
 the same volume and atomically replaces it, retaining a backup through validation.
 If installation fails, the app reports an error and restores the backup when
 replacement has started. The destination folder must be writable.

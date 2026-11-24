@@ -149,14 +149,24 @@ private final class InstallationRecorder: @unchecked Sendable {
 private struct FakeUpdateFiles: UpdateFileSystem {
     let recorder: InstallationRecorder
     var badIdentity = false
+    var symlink = false
+    var stagedVersion = "2.0.0"
+    var stagedChannel = "stable"
+    var stagedSHA = "unknown"
     func sha256(of file: URL) throws -> String { recorder.record("digest"); return String(repeating: "a", count: 64) }
     func createDirectory(_ directory: URL) throws { recorder.record("directory") }
     func remove(_ url: URL) throws { recorder.record(url.lastPathComponent.hasPrefix(".cam-backup-") ? "removeBackup" : "remove") }
     func copy(_ source: URL, to destination: URL) throws { recorder.record("copy") }
-    func bundleIdentifier(at app: URL) -> String? {
+    func bundleMetadata(at app: URL) -> UpdateBundleMetadata? {
         recorder.record("identity")
-        return badIdentity && app.path.contains("mount") ? "example.other" : "example.app"
+        if app.lastPathComponent == "App.app" && !app.path.contains("synthetic-update/.cam-update")
+            && !app.path.contains("mount") && !app.path.contains(".cam-update") {
+            return UpdateBundleMetadata(identifier: "example.app", version: "1.0.0")
+        }
+        let id = badIdentity && app.path.contains("mount") ? "example.other" : "example.app"
+        return UpdateBundleMetadata(identifier: id, version: stagedVersion, sha: stagedSHA, channel: stagedChannel)
     }
+    func hasSymlinkInBundleSkeleton(at app: URL) -> Bool { recorder.record("symlinkCheck"); return symlink }
     func replace(_ current: URL, with staged: URL, backupName: String) throws { recorder.record("replace") }
     func restore(_ current: URL, from backup: URL) throws { recorder.record("restore") }
 }
@@ -165,6 +175,8 @@ private struct FakeUpdateProcesses: UpdateProcessRunning {
     let recorder: InstallationRecorder
     var failSignatureAt = 0
     var failMount = false
+    var identifier = "example.app"
+    var flags = "0x10002(adhoc,runtime)"
     func run(_ executable: String, arguments: [String]) throws {
         if arguments.first == "attach" {
             #expect(arguments.contains("-readonly"))
@@ -177,29 +189,52 @@ private struct FakeUpdateProcesses: UpdateProcessRunning {
             if recorder.events.filter({ $0 == "signature" }).count == failSignatureAt { throw UpdateInstallError.signatureInvalid }
         }
     }
+    func runCapturing(_ executable: String, arguments: [String]) throws -> String {
+        recorder.record("details")
+        return "Executable=/x\nIdentifier=\(identifier)\nCodeDirectory v=20500 size=1 flags=\(flags) hashes=1\n"
+    }
 }
 
 private let fakeUpdateRoot = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("synthetic-update")
+private let fakeApp = fakeUpdateRoot.appendingPathComponent("App.app")
+private let stableExpectation = UpdateExpectation(tag: "v2.0.0", channel: .stable, runningVersion: "1.0.0")
+private let goodDigest = "sha256:" + String(repeating: "a", count: 64)
+
+private func installer(_ recorder: InstallationRecorder, files: FakeUpdateFiles? = nil,
+                       processes: FakeUpdateProcesses? = nil) -> UpdateInstaller {
+    UpdateInstaller(files: files ?? FakeUpdateFiles(recorder: recorder),
+                    processes: processes ?? FakeUpdateProcesses(recorder: recorder))
+}
+
+private func tryInstall(_ installer: UpdateInstaller, digest: String? = goodDigest,
+                        expectation: UpdateExpectation = stableExpectation) throws {
+    try installer.install(dmg: fakeUpdateRoot, expectedDigest: digest, expectation: expectation,
+                          over: fakeApp, work: fakeUpdateRoot)
+}
 
 @Test func updateDigestMismatchNeverMountsOrReplaces() {
     let recorder = InstallationRecorder()
-    let installer = UpdateInstaller(files: FakeUpdateFiles(recorder: recorder), processes: FakeUpdateProcesses(recorder: recorder))
+    let sut = installer(recorder)
     #expect(throws: UpdateInstallError.checksumMismatch) {
-        try installer.install(dmg: fakeUpdateRoot, expectedDigest: "sha256:" + String(repeating: "b", count: 64),
-                              over: fakeUpdateRoot.appendingPathComponent("App.app"), work: fakeUpdateRoot)
+        try tryInstall(sut, digest: "sha256:" + String(repeating: "b", count: 64))
     }
     #expect(recorder.events == ["digest"])
     for digest in ["", "md5:abc", "sha256:123"] {
-        #expect(throws: UpdateInstallError.invalidDigest) { try installer.verify(file: fakeUpdateRoot, expected: digest) }
+        #expect(throws: UpdateInstallError.invalidDigest) { try sut.verify(file: fakeUpdateRoot, expected: digest) }
     }
+}
+
+@Test func updateMissingDigestIsRefusedBeforeAnyWork() {
+    let recorder = InstallationRecorder()
+    #expect(throws: UpdateInstallError.missingDigest) { try tryInstall(installer(recorder), digest: nil) }
+    #expect(recorder.events.isEmpty)
 }
 
 @Test func updateInstallValidatesSwapsAndCleansUp() throws {
     let recorder = InstallationRecorder()
-    let installer = UpdateInstaller(files: FakeUpdateFiles(recorder: recorder), processes: FakeUpdateProcesses(recorder: recorder))
-    try installer.install(dmg: fakeUpdateRoot, expectedDigest: "sha256:" + String(repeating: "a", count: 64),
-                          over: fakeUpdateRoot.appendingPathComponent("App.app"), work: fakeUpdateRoot)
+    try tryInstall(installer(recorder))
     #expect(recorder.events.filter { $0 == "signature" }.count == 3)
+    #expect(recorder.events.filter { $0 == "details" }.count == 3)
     let replace = try #require(recorder.events.firstIndex(of: "replace"))
     let backupRemoved = try #require(recorder.events.firstIndex(of: "removeBackup"))
     #expect(replace < backupRemoved)
@@ -210,31 +245,73 @@ private let fakeUpdateRoot = URL(fileURLWithPath: NSTemporaryDirectory()).append
 @Test func updateInstallFailureUnmountsAndRestoresBackup() {
     for failure in [1, 2, 3] {
         let recorder = InstallationRecorder()
-        let installer = UpdateInstaller(files: FakeUpdateFiles(recorder: recorder),
-                                        processes: FakeUpdateProcesses(recorder: recorder, failSignatureAt: failure))
-        #expect(throws: UpdateInstallError.signatureInvalid) {
-            try installer.install(dmg: fakeUpdateRoot, expectedDigest: nil,
-                                  over: fakeUpdateRoot.appendingPathComponent("App.app"), work: fakeUpdateRoot)
-        }
-        #expect(!recorder.events.contains("digest"))
+        let sut = installer(recorder, processes: FakeUpdateProcesses(recorder: recorder, failSignatureAt: failure))
+        #expect(throws: UpdateInstallError.signatureInvalid) { try tryInstall(sut) }
         #expect(recorder.events.contains("unmount"))
         #expect(recorder.events.contains("restore") == (failure == 3))
         #expect(!recorder.events.contains("removeBackup"))
     }
 }
 
+@Test func updateRejectsWrongSignatureIdentityOrMissingRuntime() {
+    for processes in [FakeUpdateProcesses(recorder: InstallationRecorder(), identifier: "example.evil"),
+                      FakeUpdateProcesses(recorder: InstallationRecorder(), flags: "0x2(adhoc)")] {
+        let recorder = InstallationRecorder()
+        let sut = installer(recorder, processes: FakeUpdateProcesses(recorder: recorder, identifier: processes.identifier,
+                                                                      flags: processes.flags))
+        #expect(throws: UpdateInstallError.signatureInvalid) { try tryInstall(sut) }
+        #expect(!recorder.events.contains("replace"))
+        #expect(recorder.events.contains("unmount"))
+    }
+}
+
 @Test func updateRejectsWrongBundleAndUnmountsFailedAttach() {
     for mountFails in [false, true] {
         let recorder = InstallationRecorder()
-        let installer = UpdateInstaller(files: FakeUpdateFiles(recorder: recorder, badIdentity: true),
-                                        processes: FakeUpdateProcesses(recorder: recorder, failMount: mountFails))
-        #expect(throws: (any Error).self) {
-            try installer.install(dmg: fakeUpdateRoot, expectedDigest: nil,
-                                  over: fakeUpdateRoot.appendingPathComponent("App.app"), work: fakeUpdateRoot)
-        }
+        let sut = installer(recorder, files: FakeUpdateFiles(recorder: recorder, badIdentity: true),
+                            processes: FakeUpdateProcesses(recorder: recorder, failMount: mountFails))
+        #expect(throws: (any Error).self) { try tryInstall(sut) }
         #expect(recorder.events.contains("unmount"))
         #expect(!recorder.events.contains("replace"))
     }
+}
+
+@Test func updateRejectsSymlinkedBundle() {
+    let recorder = InstallationRecorder()
+    let sut = installer(recorder, files: FakeUpdateFiles(recorder: recorder, symlink: true))
+    #expect(throws: UpdateInstallError.unsafeBundle) { try tryInstall(sut) }
+    #expect(!recorder.events.contains("copy"))
+    #expect(!recorder.events.contains("replace"))
+    #expect(recorder.events.contains("unmount"))
+}
+
+@Test func updateRejectsVersionChannelAndDowngradeMismatches() {
+    let cases: [(FakeUpdateFiles, UpdateExpectation)] = [
+        (FakeUpdateFiles(recorder: InstallationRecorder(), stagedVersion: "2.0.1"), stableExpectation),
+        (FakeUpdateFiles(recorder: InstallationRecorder(), stagedChannel: "nightly"), stableExpectation),
+        (FakeUpdateFiles(recorder: InstallationRecorder(), stagedVersion: "2.0.0"),
+         UpdateExpectation(tag: "v2.0.0", channel: .stable, runningVersion: "3.0.0")),
+        (FakeUpdateFiles(recorder: InstallationRecorder(), stagedChannel: "nightly", stagedSHA: "1111111" + String(repeating: "0", count: 33)),
+         UpdateExpectation(tag: "nightly-20261025-abcdef1", channel: .nightly, runningVersion: "1.0.0")),
+        (FakeUpdateFiles(recorder: InstallationRecorder(), stagedChannel: "stable"),
+         UpdateExpectation(tag: "nightly-20261025-abcdef1", channel: .nightly, runningVersion: "1.0.0")),
+        (FakeUpdateFiles(recorder: InstallationRecorder()), UpdateExpectation(tag: "2.0.0", channel: .stable, runningVersion: "1.0.0")),
+        (FakeUpdateFiles(recorder: InstallationRecorder()), UpdateExpectation(tag: "nightly-bad", channel: .nightly, runningVersion: "1.0.0"))
+    ]
+    for (files, expectation) in cases {
+        let sut = UpdateInstaller(files: files, processes: FakeUpdateProcesses(recorder: files.recorder))
+        #expect(throws: UpdateInstallError.unexpectedVersion) { try tryInstall(sut, expectation: expectation) }
+        #expect(!files.recorder.events.contains("replace"))
+        #expect(files.recorder.events.contains("unmount"))
+    }
+}
+
+@Test func updateAcceptsMatchingNightly() throws {
+    let recorder = InstallationRecorder()
+    let sha = "abcdef1" + String(repeating: "0", count: 33)
+    let sut = installer(recorder, files: FakeUpdateFiles(recorder: recorder, stagedChannel: "nightly", stagedSHA: sha))
+    try tryInstall(sut, expectation: UpdateExpectation(tag: "nightly-20261025-abcdef1", channel: .nightly, runningVersion: "2.0.0"))
+    #expect(recorder.events.contains("replace"))
 }
 
 @Test func updateRelaunchWaitsForQuitAndPassesPathAsArgument() {
@@ -317,4 +394,71 @@ private struct FakeDownloadFiles: UpdateDownloadFileSystem {
         try runner.run("/bin/sh", arguments: ["-c", "trap '' TERM; exec /bin/sleep 30"])
     }
     #expect(Date().timeIntervalSince(start) < 5)
+}
+
+private let sumURL = URL(string: "https://github.com/fperdigon/macpocketknife/releases/download/v2/MacPocketKnife-2.dmg.sha256")!
+
+@Test func updateDigestResolverUsesAssetDigestThenChecksumFileElseRefuses() async throws {
+    let hex = String(repeating: "c", count: 64)
+    let dmg = ReleaseAsset(name: "MacPocketKnife-2.dmg", downloadURL: updateAssetURL)
+    let sum = ReleaseAsset(name: "MacPocketKnife-2.dmg.sha256", downloadURL: sumURL)
+    let release = ReleaseInfo(tag: "v2", name: "v2", prerelease: false, assets: [dmg, sum])
+    func resolver(_ body: String, _ status: Int = 200) -> UpdateDigestResolver {
+        UpdateDigestResolver { _ in (Data(body.utf8), status) }
+    }
+    let withDigest = ReleaseAsset(name: dmg.name, downloadURL: dmg.downloadURL, digest: "sha256:abc")
+    #expect(try await resolver("").resolve(asset: withDigest, in: release) == "sha256:abc")
+    #expect(try await resolver(hex.uppercased() + "  MacPocketKnife-2.dmg\n").resolve(asset: dmg, in: release) == "sha256:" + hex)
+    #expect(try await resolver(hex).resolve(asset: dmg, in: release) == "sha256:" + hex)
+    for body in ["zz", hex + "  Other.dmg", hex + " MacPocketKnife-2.dmg extra"] {
+        await #expect(throws: UpdateInstallError.invalidDigest) { try await resolver(body).resolve(asset: dmg, in: release) }
+    }
+    await #expect(throws: UpdateInstallError.invalidDigest) {
+        try await resolver(String(repeating: "a", count: 5000)).resolve(asset: dmg, in: release)
+    }
+    await #expect(throws: UpdateInstallError.downloadFailed(404)) { try await resolver("", 404).resolve(asset: dmg, in: release) }
+    let noSum = ReleaseInfo(tag: "v2", name: "v2", prerelease: false, assets: [dmg])
+    await #expect(throws: UpdateInstallError.missingDigest) { try await resolver(hex).resolve(asset: dmg, in: noSum) }
+    let evil = ReleaseAsset(name: sum.name, downloadURL: URL(string: "https://evil.example/MacPocketKnife-2.dmg.sha256")!)
+    let evilRelease = ReleaseInfo(tag: "v2", name: "v2", prerelease: false, assets: [dmg, evil])
+    await #expect(throws: UpdateInstallError.missingDigest) { try await resolver(hex).resolve(asset: dmg, in: evilRelease) }
+}
+
+@Test func updateExpectationFromAvailableUpdate() {
+    let release = ReleaseInfo(tag: "v2.0.0", name: "v2", prerelease: false)
+    let asset = ReleaseAsset(name: "MacPocketKnife-2.dmg", downloadURL: updateAssetURL)
+    let update = AvailableUpdate(channel: .stable, release: release, asset: asset, label: "2.0.0")
+    #expect(UpdateExpectation(update: update, runningVersion: "1.0.0") == stableExpectation)
+}
+
+@Test func updateInstallErrorMessagesAreDistinct() {
+    let errors: [UpdateInstallError] = [.missingDigest, .unexpectedVersion, .unsafeBundle, .invalidBundle, .signatureInvalid]
+    #expect(Set(errors.compactMap(\.errorDescription)).count == errors.count)
+}
+
+@Test func updateLocalFileSystemReadsMetadataAndDetectsSymlinks() throws {
+    let fm = FileManager.default
+    let root = fm.temporaryDirectory.appendingPathComponent("mpk-update-" + UUID().uuidString)
+    defer { try? fm.removeItem(at: root) }
+    let app = root.appendingPathComponent("A.app")
+    try fm.createDirectory(at: app.appendingPathComponent("Contents/MacOS"), withIntermediateDirectories: true)
+    let plist: [String: Any] = ["CFBundleIdentifier": "x.y", "CFBundleShortVersionString": "1.2.3",
+                                "CAMGitSHA": "ABC", "CAMBuildChannel": "nightly"]
+    try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        .write(to: app.appendingPathComponent("Contents/Info.plist"))
+    let files = LocalUpdateFileSystem()
+    #expect(files.bundleMetadata(at: app) == UpdateBundleMetadata(identifier: "x.y", version: "1.2.3", sha: "abc", channel: "nightly"))
+    #expect(files.bundleMetadata(at: root) == nil)
+    #expect(!files.hasSymlinkInBundleSkeleton(at: app))
+    try fm.createSymbolicLink(at: app.appendingPathComponent("Contents/MacOS/tool"), withDestinationURL: URL(fileURLWithPath: "/bin/sh"))
+    #expect(files.hasSymlinkInBundleSkeleton(at: app))
+    let link = root.appendingPathComponent("L.app")
+    try fm.createSymbolicLink(at: link, withDestinationURL: app)
+    #expect(files.hasSymlinkInBundleSkeleton(at: link))
+}
+
+@Test func updateProcessRunnerCapturesOutput() throws {
+    let runner = UpdateProcessRunner(timeout: 5)
+    #expect(try runner.runCapturing("/bin/sh", arguments: ["-c", "echo out; echo err >&2"]).contains("err"))
+    #expect(throws: UpdateInstallError.operationFailed) { try runner.runCapturing("/usr/bin/false", arguments: []) }
 }
