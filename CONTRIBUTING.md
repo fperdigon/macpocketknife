@@ -22,7 +22,10 @@ If the environment blocks SwiftPM's build sandbox, use `--disable-sandbox` with
 when `CI` is set; use `CI=1 swift test` to avoid accessing the real Keychain.
 
 Run `sh scripts/run-quit-test.sh` after building to check that the normally launched
-app exits with status 0 within 15 seconds using the hidden `--quit-selftest` flag.
+app exits with status 0 within 15 seconds using the hidden `--quit-selftest` flag. Hidden self-test flags only run when
+`MACPOCKETKNIFE_SELFTEST=1` is set (the CI scripts set it); otherwise they are
+refused and logged. `--record-selftest` additionally requires output paths inside
+the temporary directory or `MACPOCKETKNIFE_SELFTEST_DIR`, and at most 60 seconds.
 CI also runs this check against the Xcode-built executable.
 
 ## Running a local build
@@ -45,8 +48,7 @@ runtime requires its `com.apple.security.device.audio-input` entitlement.
 
 `swift run MacPocketKnife` launches a bare executable without the app bundle,
 Info.plist, or bundled icons, so it differs from the released app. Reserve the
-bare executable for CLI flags such as `--print-status` (print status and exit) or
-`--snapshot-settings <directory>` (save Settings tab PNGs and exit). To open
+bare executable for CLI flags such as `--print-status` (print status and exit). To open
 Settings in the local app, use `open build/MacPocketKnife.app --args --show-settings`.
 
 The local bundle has the same bundle identifier as the release and runs from
@@ -115,7 +117,7 @@ additional audio rather than proof of intelligible speech. You can rerun it with
 Both capture phases must complete; an aborted baseline or missing microphone
 attempt prints `FAIL` and exits non-zero, even if the shell loses the abort status.
 
-Only `--record-selftest` enables the recorder's stderr `MIC-DEBUG` block, printed
+Only `--record-selftest` (gated as above) enables the recorder's stderr `MIC-DEBUG` block, printed
 at stop and repeated in the local mic harness summary. It includes the start
 outcome, actual `captureMicrophone` setting, per-source buffer/conversion counts,
 first ASBD, PTS offsets from first video, maximum host-time lag, retained and late

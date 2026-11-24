@@ -32,6 +32,8 @@ if $mic; then
 fi
 work="$PWD/build/screenrec-test/$(date +%Y%m%d-%H%M%S)-$$"
 mkdir -p "$work"
+# Opt in to the app's hidden self-test flags (refused otherwise); inherited by direct launches.
+export MACPOCKETKNIFE_SELFTEST=1 MACPOCKETKNIFE_SELFTEST_DIR="$work"
 echo "Screen recording test artifacts: $work"
 mkfifo "$work/driver.pipe"
 tee "$work/driver.log" < "$work/driver.pipe" &
@@ -308,6 +310,7 @@ run_attempt() {
         local result="$work/recorder-$attempt.result" log="$work/recorder-$attempt.log" status=""
         # LaunchServices makes the bundle responsible for its own TCC permission.
         run_with_timeout "$recorder_timeout" open -n -W -a "$app" \
+            --env MACPOCKETKNIFE_SELFTEST=1 --env MACPOCKETKNIFE_SELFTEST_DIR="$work" \
             --stdout "$log" --stderr "$log" \
             --args --record-selftest "$recording" "$record_seconds" ${mic_option:+"$mic_option"} --result-file "$result" \
             > "$work/recorder-launch-$attempt.log" 2>&1 || code=$?

@@ -13,11 +13,20 @@
 // limitations under the License.
 
 @preconcurrency import AppKit
+import MacPocketKnifeCore
 
 /// Exercise the normal launch and termination delegate without launch prompts.
 @MainActor
 enum QuitSelfTest {
-    static let isRequested = CommandLine.arguments.contains("--quit-selftest")
+    /// Requires both the flag and the explicit CI environment gate; otherwise the flag is ignored.
+    static let isRequested: Bool = {
+        guard CommandLine.arguments.contains("--quit-selftest") else { return false }
+        guard SelfTestGate.isEnabled(environment: ProcessInfo.processInfo.environment) else {
+            AppLog.shared.warning(category: "app", "Refused --quit-selftest: \(SelfTestGate.environmentKey)=1 is not set")
+            return false
+        }
+        return true
+    }()
     private static var heartbeatCount = 0
     private static var heartbeatTimer: Timer?
 

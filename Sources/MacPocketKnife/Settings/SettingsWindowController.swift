@@ -46,31 +46,4 @@ final class SettingsWindowController: NSWindowController {
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
     }
-
-    func captureSnapshots(in directory: URL, completion: @escaping () -> Void) {
-        let tabs = SettingsView.Tab.allCases
-        captureSnapshot(at: 0, tabs: tabs, directory: directory, completion: completion)
-    }
-
-    private func captureSnapshot(at index: Int, tabs: [SettingsView.Tab], directory: URL, completion: @escaping () -> Void) {
-        guard index < tabs.count else {
-            completion()
-            return
-        }
-        let tab = tabs[index]
-        selection.selectedTab = tab
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-            self?.captureSnapshot(tab: tab, directory: directory)
-            self?.captureSnapshot(at: index + 1, tabs: tabs, directory: directory, completion: completion)
-        }
-    }
-
-    private func captureSnapshot(tab: SettingsView.Tab, directory: URL) {
-        guard let contentView = window?.contentView else { return }
-        let bounds = contentView.bounds
-        guard let bitmap = contentView.bitmapImageRepForCachingDisplay(in: bounds) else { return }
-        contentView.cacheDisplay(in: bounds, to: bitmap)
-        guard let png = bitmap.representation(using: .png, properties: [:]) else { return }
-        try? png.write(to: directory.appendingPathComponent("settings-\(tab.rawValue).png"))
-    }
 }

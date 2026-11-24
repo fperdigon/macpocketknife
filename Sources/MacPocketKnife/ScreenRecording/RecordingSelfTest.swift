@@ -25,6 +25,12 @@ enum RecordingSelfTest {
     static func runIfRequested() {
         let args = CommandLine.arguments
         guard args.contains("--record-selftest") else { return }
+        let environment = ProcessInfo.processInfo.environment
+        guard SelfTestGate.isEnabled(environment: environment) else {
+            // Never record from a launch flag unless CI explicitly opted in; continue a normal launch.
+            AppLog.shared.warning(category: "app", "Refused --record-selftest: \(SelfTestGate.environmentKey)=1 is not set")
+            return
+        }
         microphoneDiagnosticsEnabled = true
         var includesMicrophone = false
         var index = 4
@@ -42,8 +48,15 @@ enum RecordingSelfTest {
         }
         guard args.count >= 4,
               args[1] == "--record-selftest", let seconds = Double(args[3]),
-              seconds.isFinite, seconds > 0, seconds <= 300 else {
-            fail("Usage: MacPocketKnife --record-selftest <output.mp4> <seconds> [0 < seconds <= 300] [--mic] [--result-file <path>]", code: 2)
+              SelfTestGate.validatedDuration(seconds) != nil else {
+            fail("Usage: MacPocketKnife --record-selftest <output.mp4> <seconds> [0 < seconds <= 60] [--mic] [--result-file <path>]", code: 2)
+        }
+        let roots = SelfTestGate.allowedRoots(environment: environment, temporaryDirectory: NSTemporaryDirectory())
+        var requestedPaths = [args[2]]
+        if let resultFile { requestedPaths.append(resultFile.path) }
+        for path in requestedPaths where !SelfTestGate.isPathAllowed(path, roots: roots) {
+            AppLog.shared.warning(category: "app", "Refused --record-selftest: path outside the temporary or self-test directory")
+            fail("Refused: output paths must be inside the temporary directory or \(SelfTestGate.directoryKey)", code: 2)
         }
         let destination = URL(fileURLWithPath: args[2])
         guard !FileManager.default.fileExists(atPath: destination.path) else {
