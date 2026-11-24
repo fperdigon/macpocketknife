@@ -200,14 +200,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         QuitSelfTest.trace("update check done; settings launch actions start")
         if !QuitSelfTest.isRequested, CommandLine.arguments.contains("--show-settings") { showSettings() }
-        if !QuitSelfTest.isRequested,
-           let argumentIndex = CommandLine.arguments.firstIndex(of: "--snapshot-settings"),
-           CommandLine.arguments.indices.contains(argumentIndex + 1) {
-            let directory = URL(fileURLWithPath: CommandLine.arguments[argumentIndex + 1], isDirectory: true)
-            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            showSettings()
-            settingsWindow?.captureSnapshots(in: directory) { NSApp.terminate(nil) }
-        }
         QuitSelfTest.trace("settings launch actions done; controller wiring start")
         for controller in [controller, unlockController] {
             controller.onChange = { [weak self] _ in

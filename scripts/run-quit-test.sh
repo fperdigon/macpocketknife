@@ -68,7 +68,7 @@ sample_main_thread() {
     fi
 }
 
-"$binary" --quit-selftest >"$log" 2>&1 &
+MACPOCKETKNIFE_SELFTEST=1 "$binary" --quit-selftest >"$log" 2>&1 &
 pid=$!
 seconds=0
 while kill -0 "$pid" 2>/dev/null; do
