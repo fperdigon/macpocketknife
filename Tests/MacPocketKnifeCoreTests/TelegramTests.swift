@@ -338,3 +338,19 @@ func telegramFormatsEveryAlertLevelWithoutMachineName(level: AlertLevel) {
     await #expect(throws: TelegramSetupError.timedOut) { try await flow.discoverChatID(timeout: timeout) }
     #expect(await transport.requests.count == 1)
 }
+
+@Test @MainActor func telegramDiscoveryWithStartCodeIgnoresStrangers() async throws {
+    let code = "pair-" + String(UUID().uuidString.prefix(6))
+    let first = #"{"ok":true,"result":[{"update_id":1,"message":{"chat":{"id":5},"text":"/start"}},{"update_id":2,"message":{"chat":{"id":6},"text":"/start wrong"}}]}"#
+    let second = #"{"ok":true,"result":[{"update_id":3,"message":{"chat":{"id":7},"text":"/start \#(code)"}}]}"#
+    let transport = FakeTelegramTransport([
+        .init(botEnvelope), .init(emptyUpdatesEnvelope), .init(first), .init(second),
+    ])
+    let clock = FakeTelegramClock()
+    let flow = TelegramSetupFlow(transport: transport, clock: clock)
+    try await flow.validate(token: telegramTestCredential)
+    let discovery = Task { try await flow.discoverChatID(timeout: 10, expectedStartCode: code) }
+    await clock.waitForSleepCount(2)
+    clock.advance(by: 1)
+    #expect(try await discovery.value == 7)
+}
