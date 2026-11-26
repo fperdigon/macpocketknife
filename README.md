@@ -185,6 +185,7 @@ updates instead of asking again.
 The first release signed this way replaces ad-hoc builds, so macOS asks for
 permissions once more. If the certificate is ever rotated, expect one more re-grant.
 Builds from forks or without the signing secrets fall back to an ad-hoc signature.
+Details and gotchas: [signing guide](docs/SIGNING.md).
 
 ## About the author
 

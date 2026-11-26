@@ -27,7 +27,7 @@ fix and disclosure through the advisory; no response deadline is guaranteed.
   the move to the stable certificate is possible. It does not authenticate the
   publisher beyond GitHub account and release control, and anyone holding the
   signing key could sign updates; a notarized signed-update scheme is planned.
-- Signing key: releases are signed with a self-signed certificate whose private
+- Signing key (see [docs/SIGNING.md](docs/SIGNING.md)): releases are signed with a self-signed certificate whose private
   key is stored only as GitHub Actions secrets (`SIGNING_CERT_P12`,
   `SIGNING_CERT_PASSWORD`), available to the release build job only. The
   certificate is not notarized or trusted by Gatekeeper. If you suspect the key

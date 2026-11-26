@@ -254,6 +254,8 @@ reset or launch the installed app for verification. Run
 
 ## Release signing
 
+Full background, certificate creation steps and gotchas: [docs/SIGNING.md](docs/SIGNING.md).
+
 The release workflow signs with one self-signed certificate ("MacPocketKnife Signing",
 code-signing usage) so permission grants survive updates. It is not notarized and not
 trusted by Gatekeeper, so address it by SHA-1 hash, never by name, and use
