@@ -26,6 +26,7 @@ public enum UpdateInstallError: Error, Equatable, Sendable, LocalizedError {
     case missingDigest
     case unexpectedVersion
     case unsafeBundle
+    case signerMismatch
 
     public var errorDescription: String? {
         switch self {
@@ -38,6 +39,7 @@ public enum UpdateInstallError: Error, Equatable, Sendable, LocalizedError {
         case .missingDigest: return "The release provides no SHA-256 checksum, so the download cannot be verified. Installation was refused."
         case .unexpectedVersion: return "The downloaded app does not match the release that was offered (or is older than the running app). Installation was refused."
         case .unsafeBundle: return "The downloaded app contains symbolic links where none are expected. Installation was refused."
+        case .signerMismatch: return "The update is not signed by the same certificate as the running app. Installation was refused."
         }
     }
 }
@@ -121,6 +123,49 @@ public struct UpdateExpectation: Equatable, Sendable {
     }
 }
 
+/// Who signed a bundle, as read from `codesign -dvv -r- <app>` output.
+public enum UpdateSigner: Equatable, Sendable {
+    case adhoc
+    /// Authority chain (leaf first) and, when the designated requirement pins one, the leaf
+    /// certificate's SHA-1 hash. Both must match for two bundles to share a signer.
+    case certificate(authorities: [String], leafHash: String?)
+
+    /// Returns nil when the output shows neither an ad-hoc signature nor a certificate authority.
+    public static func parse(_ details: String) -> UpdateSigner? {
+        var authorities: [String] = []
+        var leafHash: String?
+        for raw in details.split(separator: "\n") {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line == "Signature=adhoc" { return .adhoc }
+            if line.hasPrefix("Authority=") {
+                let name = String(line.dropFirst("Authority=".count))
+                if !name.isEmpty { authorities.append(name) }
+            } else if leafHash == nil, let range = line.range(of: "certificate leaf = H\"") {
+                let rest = line[range.upperBound...]
+                if let end = rest.firstIndex(of: "\"") { leafHash = String(rest[..<end]).lowercased() }
+            }
+        }
+        guard !authorities.isEmpty else { return nil }
+        return .certificate(authorities: authorities, leafHash: leafHash)
+    }
+
+    /// A stable string for certificate signers (nil for ad-hoc), used to remember the signer.
+    public var marker: String? {
+        switch self {
+        case .adhoc: return nil
+        case .certificate(let authorities, let leafHash):
+            return authorities.joined(separator: ">") + "|" + (leafHash ?? "")
+        }
+    }
+
+    /// Reads the signer of `app`; unreadable or unrecognised output yields nil.
+    public static func read(of app: String, using processes: any UpdateProcessRunning) -> UpdateSigner? {
+        guard let details = try? processes.runCapturing("/usr/bin/codesign", arguments: ["-dvv", "-r-", app])
+        else { return nil }
+        return parse(details)
+    }
+}
+
 public struct UpdateInstaller: Sendable {
     private let files: any UpdateFileSystem
     private let processes: any UpdateProcessRunning
@@ -151,6 +196,10 @@ public struct UpdateInstaller: Sendable {
         guard current.pathExtension == "app", let identifier = files.bundleMetadata(at: current)?.identifier else {
             throw UpdateInstallError.invalidBundle
         }
+        // A running app signed by a certificate may only be replaced by the same signer. An ad-hoc
+        // running app keeps the old behavior so the first certificate-signed release can install.
+        // An unreadable signature fails closed.
+        let runningSigner = try signer(of: current)
         let mount = work.appendingPathComponent("mount")
         let staging = current.deletingLastPathComponent().appendingPathComponent(".cam-update-" + UUID().uuidString)
         let backupName = ".cam-backup-" + UUID().uuidString
@@ -167,15 +216,18 @@ public struct UpdateInstaller: Sendable {
         let source = mount.appendingPathComponent("MacPocketKnife.app")
         try validateBundle(source, identifier: identifier, expectation: expectation)
         try validateSignature(source, identifier: identifier)
+        try requireSigner(source, matching: runningSigner)
         try files.createDirectory(staging)
         let staged = staging.appendingPathComponent(current.lastPathComponent)
         try files.copy(source, to: staged)
         try validateBundle(staged, identifier: identifier, expectation: expectation)
         try validateSignature(staged, identifier: identifier)
+        try requireSigner(staged, matching: runningSigner)
         do {
             try files.replace(current, with: staged, backupName: backupName)
             guard files.bundleMetadata(at: current)?.identifier == identifier else { throw UpdateInstallError.invalidBundle }
             try validateSignature(current, identifier: identifier)
+            try requireSigner(current, matching: runningSigner)
         } catch {
             // A failed rollback keeps the backup on disk for recovery.
             try files.restore(current, from: backup)
@@ -206,6 +258,18 @@ public struct UpdateInstaller: Sendable {
                   lines.contains(where: { $0.hasPrefix("CodeDirectory ") && $0.contains("flags=") && $0.contains("runtime") })
             else { throw UpdateInstallError.signatureInvalid }
         } catch { throw UpdateInstallError.signatureInvalid }
+    }
+
+    private func signer(of app: URL) throws -> UpdateSigner {
+        guard let signer = UpdateSigner.read(of: app.path, using: processes) else {
+            throw UpdateInstallError.signatureInvalid
+        }
+        return signer
+    }
+
+    private func requireSigner(_ app: URL, matching running: UpdateSigner) throws {
+        guard running != .adhoc else { return }
+        guard try signer(of: app) == running else { throw UpdateInstallError.signerMismatch }
     }
 
     /// Positional arguments keep app paths out of shell code. The helper waits for

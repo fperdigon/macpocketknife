@@ -157,6 +157,7 @@ final class UpdateController: NSObject {
             case .missingDigest: return "missing-digest"
             case .unexpectedVersion: return "unexpected-version"
             case .unsafeBundle: return "unsafe-bundle"
+            case .signerMismatch: return "signer-mismatch"
             }
         }
         if error is CancellationError { return "cancelled" }
