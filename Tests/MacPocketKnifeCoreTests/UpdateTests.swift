@@ -177,6 +177,9 @@ private struct FakeUpdateProcesses: UpdateProcessRunning {
     var failMount = false
     var identifier = "example.app"
     var flags = "0x10002(adhoc,runtime)"
+    var runningSigner = "Signature=adhoc\n"
+    var updateSigner = "Signature=adhoc\n"
+    var installedSigner: String?
     func run(_ executable: String, arguments: [String]) throws {
         if arguments.first == "attach" {
             #expect(arguments.contains("-readonly"))
@@ -190,6 +193,13 @@ private struct FakeUpdateProcesses: UpdateProcessRunning {
         }
     }
     func runCapturing(_ executable: String, arguments: [String]) throws -> String {
+        if arguments.first == "-dvv" {
+            recorder.record("signer")
+            let isInstalledPath = arguments.last == fakeApp.path
+            if isInstalledPath && !recorder.events.contains("replace") { return runningSigner }
+            if isInstalledPath, let installedSigner { return installedSigner }
+            return updateSigner
+        }
         recorder.record("details")
         return "Executable=/x\nIdentifier=\(identifier)\nCodeDirectory v=20500 size=1 flags=\(flags) hashes=1\n"
     }
@@ -431,8 +441,94 @@ private let sumURL = URL(string: "https://github.com/fperdigon/macpocketknife/re
     #expect(UpdateExpectation(update: update, runningVersion: "1.0.0") == stableExpectation)
 }
 
+private func certificateSigner(_ name: String, hash: String = "ab12") -> String {
+    "Authority=\(name)\ndesignated => identifier \"example.app\" and certificate leaf = H\"\(hash)\"\n"
+}
+
+private func signerInstaller(_ recorder: InstallationRecorder, running: String, update: String,
+                             installed: String? = nil) -> UpdateInstaller {
+    var processes = FakeUpdateProcesses(recorder: recorder)
+    processes.runningSigner = running
+    processes.updateSigner = update
+    processes.installedSigner = installed
+    return installer(recorder, processes: processes)
+}
+
+@Test func updateSignerParsing() {
+    #expect(UpdateSigner.parse("Identifier=x\nSignature=adhoc\nTeamIdentifier=not set\n") == .adhoc)
+    let parsed = UpdateSigner.parse("Authority=Leaf CN\nAuthority=Root CN\n(designated) certificate leaf = H\"ABCD\"\n")
+    #expect(parsed == .certificate(authorities: ["Leaf CN", "Root CN"], leafHash: "abcd"))
+    #expect(parsed?.marker == "Leaf CN>Root CN|abcd")
+    #expect(UpdateSigner.parse("Authority=Only\n")?.marker == "Only|")
+    #expect(UpdateSigner.adhoc.marker == nil)
+    #expect(UpdateSigner.parse("") == nil)
+    #expect(UpdateSigner.parse("Identifier=x\nAuthority=\n") == nil)
+    #expect(UpdateSigner.parse("certificate leaf = H\"abcd\" no end") == nil)
+    #expect(UpdateSigner.parse("Authority=A\ncertificate leaf = H\"abcd\nmissing quote\n")
+        == .certificate(authorities: ["A"], leafHash: nil))
+}
+
+@Test func updateAdhocRunningAppMayInstallCertificateSignedUpdate() throws {
+    let recorder = InstallationRecorder()
+    try tryInstall(signerInstaller(recorder, running: "Signature=adhoc\n", update: certificateSigner("New Cert")))
+    #expect(recorder.events.contains("replace"))
+}
+
+@Test func updateSameCertificateIsAllowed() throws {
+    let recorder = InstallationRecorder()
+    let cert = certificateSigner("My Cert")
+    try tryInstall(signerInstaller(recorder, running: cert, update: cert))
+    #expect(recorder.events.contains("replace"))
+    #expect(recorder.events.filter { $0 == "signer" }.count == 4)
+}
+
+@Test func updateDifferentCertificateOrAdhocIsRefused() {
+    let cases: [(String, String)] = [
+        (certificateSigner("My Cert"), certificateSigner("Other Cert")),
+        (certificateSigner("My Cert", hash: "aa"), certificateSigner("My Cert", hash: "bb")),
+        (certificateSigner("My Cert"), "Signature=adhoc\n")
+    ]
+    for (running, update) in cases {
+        let recorder = InstallationRecorder()
+        let sut = signerInstaller(recorder, running: running, update: update)
+        #expect(throws: UpdateInstallError.signerMismatch) { try tryInstall(sut) }
+        #expect(!recorder.events.contains("copy"))
+        #expect(!recorder.events.contains("replace"))
+        #expect(recorder.events.contains("unmount"))
+    }
+}
+
+@Test func updateInstalledCopyWithDifferentSignerRollsBack() {
+    let recorder = InstallationRecorder()
+    let cert = certificateSigner("My Cert")
+    let sut = signerInstaller(recorder, running: cert, update: cert, installed: certificateSigner("Other"))
+    #expect(throws: UpdateInstallError.signerMismatch) { try tryInstall(sut) }
+    #expect(recorder.events.contains("restore"))
+}
+
+@Test func updateUnreadableSignerFailsClosed() {
+    let unreadable = "garbage\n"
+    let cases: [(String, String)] = [
+        (unreadable, "Signature=adhoc\n"),
+        ("", certificateSigner("My Cert")),
+        (certificateSigner("My Cert"), unreadable)
+    ]
+    for (running, update) in cases {
+        let recorder = InstallationRecorder()
+        let sut = signerInstaller(recorder, running: running, update: update)
+        #expect(throws: UpdateInstallError.signatureInvalid) { try tryInstall(sut) }
+        #expect(!recorder.events.contains("replace"))
+    }
+}
+
+@Test func updateSignerReadFailsClosedWhenRunnerCannotCapture() {
+    struct NoCapture: UpdateProcessRunning { func run(_ executable: String, arguments: [String]) throws {} }
+    #expect(UpdateSigner.read(of: "/x", using: NoCapture()) == nil)
+}
+
 @Test func updateInstallErrorMessagesAreDistinct() {
-    let errors: [UpdateInstallError] = [.missingDigest, .unexpectedVersion, .unsafeBundle, .invalidBundle, .signatureInvalid]
+    let errors: [UpdateInstallError] = [.missingDigest, .unexpectedVersion, .unsafeBundle, .invalidBundle, .signatureInvalid,
+                                        .signerMismatch]
     #expect(Set(errors.compactMap(\.errorDescription)).count == errors.count)
 }
 

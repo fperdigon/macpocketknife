@@ -14,6 +14,7 @@
 # limitations under the License.
 
 # Verify a download without launching it. Each image is mounted read-only.
+# Set EXPECT_SIGNED_IDENTITY to a certificate name to also require that the app is signed by it.
 set -uo pipefail
 [ "$#" -ge 1 ] || { echo "usage: $0 file.dmg [file.dmg ...]" >&2; exit 2; }
 
@@ -69,6 +70,13 @@ verify_one() (
     codesign --verify --deep --strict "$app" || fail 'invalid code signature'
     entitlements=$(codesign -d --entitlements - --xml "$app" 2>&1) || fail 'could not read code signature entitlements'
     printf '%s\n' "$entitlements" | grep -Fq '<key>com.apple.security.device.audio-input</key>' || fail 'missing microphone entitlement'
+    if [ -n "${EXPECT_SIGNED_IDENTITY:-}" ]; then
+        # The release certificate is self-signed, so the leaf is the first Authority line.
+        details=$(codesign -dvv "$app" 2>&1) || fail 'could not read code signature details'
+        printf '%s\n' "$details" | grep -Fxq 'Signature=adhoc' && fail 'expected a certificate signature but the app is ad-hoc signed'
+        leaf=$(printf '%s\n' "$details" | sed -n 's/^Authority=//p' | awk 'NR == 1')
+        [ "$leaf" = "$EXPECT_SIGNED_IDENTITY" ] || fail "unexpected signing identity (expected $EXPECT_SIGNED_IDENTITY, found ${leaf:-none})"
+    fi
     echo 'PASS: bundle structure, universal executable, whole-bundle signature and microphone entitlement'
 )
 failures=0

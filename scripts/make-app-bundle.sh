@@ -49,12 +49,15 @@ sed -e "s/@VERSION@/$version/g" -e "s/@GIT_SHA@/$build_sha/g" \
 plutil -lint "$bundle/Contents/Info.plist" >&2
 plutil -lint "$root/Resources/MacPocketKnife.entitlements" >&2
 
+# SIGN_IDENTITY is "-" (ad-hoc, the default) or the SHA-1 hash of a code-signing certificate.
+# The release certificate is self-signed and untrusted, so it is addressed by hash and signed
+# without a timestamp (there is no timestamp authority to trust it).
 identity=${SIGN_IDENTITY:--}
 if [ "$identity" = '-' ]; then
     codesign --force --sign - --options runtime \
         --entitlements "$root/Resources/MacPocketKnife.entitlements" "$bundle" >&2
 else
-    codesign --force --sign "$identity" --options runtime --timestamp \
+    codesign --force --sign "$identity" --options runtime --timestamp=none \
         --entitlements "$root/Resources/MacPocketKnife.entitlements" "$bundle" >&2
 fi
 codesign --verify --deep --strict "$bundle" >&2

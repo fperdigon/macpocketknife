@@ -45,8 +45,8 @@ Install:
 brew install --cask fperdigon/tap/macpocketknife
 ```
 
-The cask removes the quarantine flag so Gatekeeper does not block this ad-hoc
-signed, non-notarized app.
+The cask removes the quarantine flag so Gatekeeper does not block this
+non-notarized app (self-signed or ad-hoc).
 
 Upgrade:
 
@@ -82,7 +82,7 @@ brew uninstall --cask macpocketknife --zap
    ```
 
 3. Open the DMG, drag **MacPocketKnife** to Applications, then eject the DMG.
-4. The app is ad-hoc signed and **not notarized**, so macOS blocks it on first
+4. The app is signed with a self-signed certificate (or ad-hoc) and **not notarized**, so macOS blocks it on first
    launch. Try to open it once, then go to **System Settings > Privacy & Security**,
    scroll to the message about MacPocketKnife, click **Open Anyway**, and confirm.
    On macOS 15 and later, the old right-click > Open shortcut no longer bypasses
@@ -137,9 +137,10 @@ opt-in and disabled by default in the core formatter.
 Daily diagnostic logs stay on this Mac for 30 days; open them in **Settings > About > Logs**.
 
 The in-app updater downloads over HTTPS from GitHub, requires a SHA-256 digest,
-and runs structural and ad-hoc code-signature consistency checks. It does not
-authenticate the publisher beyond control of the GitHub account and releases; a
-signed-update scheme is planned (details in [privacy](docs/PRIVACY.md)).
+and runs structural and code-signature consistency checks. When the running app
+is signed by a certificate, the update must carry the same signer. It does not
+authenticate the publisher beyond control of the GitHub account and releases (the
+signer check only compares against the running app); a notarized signed-update scheme is planned (details in [privacy](docs/PRIVACY.md)).
 
 See [privacy and removal details](docs/PRIVACY.md). Report vulnerabilities using
 the private process in [SECURITY.md](SECURITY.md).
@@ -151,7 +152,11 @@ See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
 ## Permissions after updates
 
-Ad-hoc signed updates can invalidate macOS permission grants. **Settings > General >
+Ad-hoc signed updates invalidate macOS permission grants, because the signature changes
+with every build. Releases are signed with one stable self-signed certificate instead
+(see below), so grants are meant to survive updates between builds signed with it. The
+first update to a build signed this way, and any later certificate rotation, still needs
+a one-time re-grant. **Settings > General >
 Reset permissions after updates** is on by default. On the first launch, and whenever
 the main executable's SHA-256 changes (including nightlies with the same version),
 the app uses the system `/usr/bin/tccutil` tool to reset only its own
@@ -161,6 +166,26 @@ Re-allow Screen Recording and Microphone in **Record screen… > Permissions**;
 dictation requests Speech Recognition again on use. A local notice appears if
 notifications are authorized and at least one reset succeeds. Turn the setting off
 to keep existing entries. Resets do not grant access or read capture content.
+
+When the previous and the current build are signed by the same certificate, the
+reset is skipped, so existing grants are kept. The app remembers the signer of the
+last build it saw for this comparison.
+
+### Stable signing identity
+
+Release builds are signed with one self-signed certificate named
+"MacPocketKnife Signing", so the signing identity stays the same from build to
+build. The private key lives only in the project's CI secrets; it is not in the
+repository. This is **not notarization and not an Apple Developer ID**: the
+certificate is not trusted by Gatekeeper, so the first-launch warning above still
+applies. Its only purpose is a stable identity, which lets macOS keep Screen
+Recording, Microphone and Speech Recognition grants (and Keychain items) across
+updates instead of asking again.
+
+The first release signed this way replaces ad-hoc builds, so macOS asks for
+permissions once more. If the certificate is ever rotated, expect one more re-grant.
+Builds from forks or without the signing secrets fall back to an ad-hoc signature.
+Details and gotchas: [signing guide](docs/SIGNING.md).
 
 ## About the author
 

@@ -19,7 +19,9 @@ import MacPocketKnifeCore
 private final class ResetStorage: PermissionResetBuildStoring, @unchecked Sendable {
     var lastBuildID: String?
     var writes = 0
+    var lastSigner: String?
     func store(buildID: String) { lastBuildID = buildID; writes += 1 }
+    func store(signer: String?) { lastSigner = signer }
 }
 
 private final class ResetRunner: UpdateProcessRunning, @unchecked Sendable {
@@ -160,4 +162,77 @@ private final class ResetRunner: UpdateProcessRunning, @unchecked Sendable {
     let notice = NoticeComposer().composePermissionResetAfterUpdate()
     #expect(notice.kind == .info)
     #expect(notice.body == "MacPocketKnife was updated. Re-allow Screen Recording and Microphone in Record screen… > Permissions.")
+}
+
+@Test func permissionResetSignerDecision() {
+    let shouldReset = PermissionResetAfterUpdate.shouldReset
+    #expect(!shouldReset("a", "b", "cert", "cert"))
+    #expect(shouldReset("a", "b", "cert", "other"))
+    #expect(shouldReset("a", "b", nil, "cert"))
+    #expect(shouldReset("a", "b", "cert", nil))
+    #expect(shouldReset("a", "b", nil, nil))
+    #expect(shouldReset(nil, "b", "cert", "cert"))
+    #expect(shouldReset("a", "b", "", ""))
+    #expect(!shouldReset("a", "a", "cert", "other"))
+}
+
+@Test func permissionResetSkippedWhenSameCertificateButMarkersUpdate() async {
+    let storage = ResetStorage()
+    storage.lastBuildID = "old"
+    storage.lastSigner = "cert"
+    let runner = ResetRunner(storage: storage)
+    let reset = PermissionResetAfterUpdate(processes: runner, storage: storage, buildID: { "new" },
+                                           signer: { "cert" }, logger: .noop)
+    #expect(await !reset.run(enabled: true, channel: "stable", environment: [:], arguments: []))
+    #expect(runner.calls.isEmpty)
+    #expect(storage.lastBuildID == "new")
+    #expect(storage.lastSigner == "cert")
+}
+
+@Test func permissionResetRunsOnceWhenSwitchingToCertificateThenSkips() async {
+    let storage = ResetStorage()
+    storage.lastBuildID = "adhoc-build"
+    let runner = ResetRunner(storage: storage)
+    let first = PermissionResetAfterUpdate(processes: runner, storage: storage, buildID: { "b1" },
+                                           signer: { "cert" }, logger: .noop)
+    #expect(await first.run(enabled: true, channel: "stable", environment: [:], arguments: []))
+    #expect(storage.lastSigner == "cert")
+    let second = PermissionResetAfterUpdate(processes: runner, storage: storage, buildID: { "b2" },
+                                            signer: { "cert" }, logger: .noop)
+    #expect(await !second.run(enabled: true, channel: "stable", environment: [:], arguments: []))
+    #expect(runner.calls.count == 3)
+    storage.writes = 0
+    let rotated = PermissionResetAfterUpdate(processes: runner, storage: storage, buildID: { "b3" },
+                                             signer: { "new-cert" }, logger: .noop)
+    #expect(await rotated.run(enabled: true, channel: "stable", environment: [:], arguments: []))
+    #expect(storage.lastSigner == "new-cert")
+    // Back to ad-hoc clears the marker.
+    storage.writes = 0
+    let adhoc = PermissionResetAfterUpdate(processes: runner, storage: storage, buildID: { "b4" },
+                                           signer: { nil }, logger: .noop)
+    #expect(await adhoc.run(enabled: true, channel: "stable", environment: [:], arguments: []))
+    #expect(storage.lastSigner == nil)
+}
+
+@Test func permissionResetDefaultSignerFailsClosedToReset() async {
+    let storage = ResetStorage()
+    storage.lastBuildID = "old"
+    storage.lastSigner = "cert"
+    let runner = ResetRunner(storage: storage)
+    // The runner cannot capture, so the signer is unknown and the reset still happens.
+    let reset = PermissionResetAfterUpdate(processes: runner, storage: storage, buildID: { "new" }, logger: .noop)
+    #expect(await reset.run(enabled: true, channel: "stable", environment: [:], arguments: []))
+    #expect(storage.lastSigner == nil)
+}
+
+@Test func permissionResetStoreKeepsSignerMarker() throws {
+    let name = "permission-reset-signer-" + UUID().uuidString
+    let defaults = try #require(UserDefaults(suiteName: name))
+    defer { defaults.removePersistentDomain(forName: name) }
+    let storage = UserDefaultsPermissionResetStore(defaults: defaults)
+    #expect(storage.lastSigner == nil)
+    storage.store(signer: "cert")
+    #expect(storage.lastSigner == "cert")
+    storage.store(signer: nil)
+    #expect(storage.lastSigner == nil)
 }

@@ -17,16 +17,29 @@
 public protocol PermissionResetBuildStoring: Sendable {
     var lastBuildID: String? { get }
     func store(buildID: String)
+    /// Certificate signer (see `UpdateSigner.marker`) of the last-seen build, nil when ad-hoc or unknown.
+    var lastSigner: String? { get }
+    func store(signer: String?)
+}
+
+extension PermissionResetBuildStoring {
+    public var lastSigner: String? { nil }
+    public func store(signer: String?) {}
 }
 
 /// Accessed serially by the launch reset task; UserDefaults is thread safe.
 public final class UserDefaultsPermissionResetStore: PermissionResetBuildStoring, @unchecked Sendable {
     public static let key = "lastPermissionResetBuildID"
+    public static let signerKey = "lastPermissionResetSigner"
     private let defaults: UserDefaults
 
     public init(defaults: UserDefaults = .standard) { self.defaults = defaults }
     public var lastBuildID: String? { defaults.string(forKey: Self.key) }
     public func store(buildID: String) { defaults.set(buildID, forKey: Self.key) }
+    public var lastSigner: String? { defaults.string(forKey: Self.signerKey) }
+    public func store(signer: String?) {
+        if let signer { defaults.set(signer, forKey: Self.signerKey) } else { defaults.removeObject(forKey: Self.signerKey) }
+    }
 }
 
 /// Run once at launch, before making capture controllers or registering hotkeys.
@@ -36,22 +49,38 @@ public struct PermissionResetAfterUpdate: Sendable {
     private let processes: any UpdateProcessRunning
     private let storage: any PermissionResetBuildStoring
     private let buildID: @Sendable () throws -> String
+    private let signer: (@Sendable () -> String?)?
     private let logger: AppLogger
 
     public init(
         processes: any UpdateProcessRunning = UpdateProcessRunner(timeout: 10),
         storage: any PermissionResetBuildStoring = UserDefaultsPermissionResetStore(),
         buildID: @escaping @Sendable () throws -> String = PermissionResetAfterUpdate.currentBuildID,
+        signer: (@Sendable () -> String?)? = nil,
         logger: AppLogger = AppLog.shared
     ) {
+        self.signer = signer
         self.processes = processes
         self.storage = storage
         self.buildID = buildID
         self.logger = logger
     }
 
-    public static func shouldReset(storedBuildID: String?, currentBuildID: String) -> Bool {
-        !currentBuildID.isEmpty && storedBuildID != currentBuildID
+    /// A changed build normally resets the grants (an ad-hoc signature changes with every build).
+    /// When the previous and current build share the same certificate signer, macOS keeps the
+    /// grants, so the reset is skipped. A missing or different signer always resets.
+    public static func shouldReset(storedBuildID: String?, currentBuildID: String,
+                                   storedSigner: String? = nil, currentSigner: String? = nil) -> Bool {
+        guard !currentBuildID.isEmpty, storedBuildID != currentBuildID else { return false }
+        if storedBuildID != nil, let currentSigner, !currentSigner.isEmpty, storedSigner == currentSigner {
+            return false
+        }
+        return true
+    }
+
+    /// The running app's certificate signer, nil when ad-hoc or unreadable.
+    static func currentSigner(using processes: any UpdateProcessRunning) -> String? {
+        UpdateSigner.read(of: Bundle.main.bundlePath, using: processes)?.marker
     }
 
     public static func isTestOrCI(environment: [String: String], arguments: [String]) -> Bool {
@@ -84,9 +113,17 @@ public struct PermissionResetAfterUpdate: Sendable {
             logger.warning(category: "permission", "Permission reset skipped category=buildID")
             return false
         }
-        guard Self.shouldReset(storedBuildID: storage.lastBuildID, currentBuildID: current) else { return false }
+        let currentSigner = signer?() ?? Self.currentSigner(using: processes)
+        let storedSigner = storage.lastSigner
+        guard Self.shouldReset(storedBuildID: storage.lastBuildID, currentBuildID: current,
+                               storedSigner: storedSigner, currentSigner: currentSigner) else {
+            if storage.lastBuildID != current { storage.store(buildID: current) }
+            if storedSigner != currentSigner { storage.store(signer: currentSigner) }
+            return false
+        }
         let didReset = await resetAll(deadline: Self.deadline)
         storage.store(buildID: current)
+        storage.store(signer: currentSigner)
         return didReset
     }
 

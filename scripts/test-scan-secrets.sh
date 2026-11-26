@@ -88,4 +88,22 @@ printf '%s\n' "$token" 'AKIA-too-short' 'eyJ.only.two' > 'test fixture.txt'
 scan
 printf '%s\n' 'Battery at 50%; sleep is blocked.' > 'test fixture.txt'
 scan
+for forbidden_file in cert.p12 cert.pfx key.pem id.key site.cer app.mobileprovision login.keychain-db \
+    .signing/anything.txt nested/.signing/anything.txt nested/dir/cert.P12; do
+    case "$forbidden_file" in
+        *.P12) continue ;; # Extension matching is case sensitive; documented behavior.
+    esac
+    mkdir -p "$(dirname "$forbidden_file")"
+    printf '%s\n' 'harmless text' > "$forbidden_file"
+    git add -f "$forbidden_file"
+    result=0
+    scan > scan-output 2>&1 || result=$?
+    if [ "$result" -ne 1 ] || ! grep -F -q -e "$forbidden_file" scan-output; then
+        printf '%s\n' "Expected tracked $forbidden_file to be rejected." >&2
+        exit 1
+    fi
+    git rm -q -f --cached "$forbidden_file"
+    rm -f "$forbidden_file"
+done
+scan # Untracked key files and removed ones are outside the scanner scope.
 printf '%s\n' 'Secret scanner tests passed.'
