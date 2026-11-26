@@ -23,7 +23,7 @@ What it gives: grants and Keychain items survive updates; the updater can requir
 What it does not give: Gatekeeper still warns (only Developer ID + notarization removes it). The first release signed this way needs one last re-grant of permissions. The private key must never be committed. Not a substitute for Apple notarization.
 
 Rules learned the hard way:
-- Keep key material OUTSIDE every repo, in `a private directory outside every repository (for example `~/.signing/macpocketknife/`)` with mode 700. Do not rely on `.gitignore` alone.
+- Keep key material OUTSIDE every repo, in a private directory outside every repository (for example `~/.signing/macpocketknife/`) with mode 700. Do not rely on `.gitignore` alone.
 - Use macOS `/usr/bin/openssl` (LibreSSL). Its `.p12` imports with `security import` on CI runners; a newer OpenSSL 3 default (AES-256 PBES2) can fail there.
 - Password prompts do not work in a chat tool's `!` box. Run interactive commands in a real terminal.
 - `base64 -i missing | gh secret set NAME` prints "Set Actions secret" even when the file is missing, because it stores an EMPTY value. Always check the file size first (`test -s file && ...`).
