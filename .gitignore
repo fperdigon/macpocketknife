@@ -6,6 +6,11 @@ DerivedData/
 xcuserdata/
 .env
 *.p12
+*.pfx
+*.pem
+*.key
+*.cer
 *.mobileprovision
+.signing/
 build/
 dist/

@@ -37,7 +37,8 @@ scripts/run-local.sh
 ```
 
 This uses the release build and bundle pipeline to create and launch
-`build/MacPocketKnife.app`, including its icons, Info.plist, and ad-hoc signature.
+`build/MacPocketKnife.app`, including its icons, Info.plist, and signature (the stable "MacPocketKnife Signing"
+identity when it is in your keychain, otherwise ad-hoc).
 It uses the `dev` build channel and the version from `VERSION`. Run
 `scripts/run-local.sh --no-launch` to build the bundle without quitting or
 launching an app.
@@ -227,7 +228,11 @@ Contributions are licensed under Apache-2.0; preserve [LICENSE](LICENSE),
 
 ## Permissions after updates
 
-Ad-hoc signed updates can invalidate macOS permission grants. **Settings > General >
+Ad-hoc signed updates invalidate macOS permission grants, because the signature changes
+with every build. Releases are signed with one stable self-signed certificate instead
+(see below), so grants are meant to survive updates between builds signed with it. The
+first update to a build signed this way, and any later certificate rotation, still needs
+a one-time re-grant. **Settings > General >
 Reset permissions after updates** is on by default. On the first launch, and whenever
 the main executable's SHA-256 changes (including nightlies with the same version),
 the app uses the system `/usr/bin/tccutil` tool to reset only its own
@@ -246,3 +251,35 @@ to avoid retrying every launch. Hash failures leave the saved ID unchanged.
 Test this flow only with injected process/storage fakes; never run the real product
 reset or launch the installed app for verification. Run
 `CI=1 swift test --disable-sandbox --enable-code-coverage` for coverage.
+
+## Release signing
+
+The release workflow signs with one self-signed certificate ("MacPocketKnife Signing",
+code-signing usage) so permission grants survive updates. It is not notarized and not
+trusted by Gatekeeper, so address it by SHA-1 hash, never by name, and use
+`security find-identity -p codesigning` (without `-v`, which hides untrusted
+identities).
+
+- The `build` job calls `scripts/import-signing-identity.sh` with the secrets
+  `SIGNING_CERT_P12` (base64 of the .p12) and `SIGNING_CERT_PASSWORD` in that step's
+  environment only. It imports into a temporary keychain, exports `SIGN_IDENTITY`
+  (the hash) and `EXPECT_SIGNED_IDENTITY`, and a final step deletes the keychain.
+  Publish jobs never receive the secrets.
+- With neither secret set (forks, missing configuration) the build stays ad-hoc and the
+  workflow shows a warning. A partial or failing import fails the job.
+- `scripts/make-app-bundle.sh` signs with `SIGN_IDENTITY` (default `-`, ad-hoc), the
+  hardened runtime and the entitlements file, without a timestamp (a self-signed
+  certificate has no trusted timestamp authority).
+- `scripts/verify-dmg.sh` additionally checks the leaf `Authority=` line when
+  `EXPECT_SIGNED_IDENTITY` is set.
+- `scripts/run-local.sh` signs with the same certificate when it is in your login
+  keychain, otherwise ad-hoc.
+- Never commit certificates or keys: `.gitignore` excludes `*.p12`, `*.pfx`, `*.pem`,
+  `*.key`, `*.cer`, `*.mobileprovision` and `.signing/`, and `scripts/scan-secrets.sh`
+  fails on tracked files with those extensions and on private-key blocks.
+
+Rotation: create a new code-signing certificate, update both secrets, and publish a
+release. Users of builds signed with the old certificate must reinstall manually (the
+updater refuses a different signer) and re-grant permissions once. The first release
+signed by any certificate also needs a one-time re-grant, as moving from ad-hoc changes
+the app's identity to macOS.

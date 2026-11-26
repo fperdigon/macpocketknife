@@ -159,12 +159,14 @@ HTTPS from `github.com`; the file matches a SHA-256 digest (GitHub's asset diges
 the release's `.sha256` file; with neither, installation is refused); the mounted
 app is not a symbolic link and has this app's bundle identifier; its version and
 build channel match the offered release and are not older than the running version
-(stable); and its ad-hoc code signature is self-consistent, with the hardened
+(stable); and its code signature is self-consistent, with the hardened
 runtime flag and a signing identifier equal to the bundle identifier. The digest
 and the download both come from GitHub, so these checks detect corruption and
 mismatched or malformed bundles, but they do not authenticate the publisher:
 whoever controls the GitHub release can publish an update this app will accept.
-A signed-update scheme (publisher signature checked by the app) is planned.
+If the running app is signed with a certificate, the update must be signed by the same
+certificate chain and leaf hash; an ad-hoc running app skips this comparison so it can move
+to the stable certificate. A notarized, publisher-verified update scheme is planned.
 
 ## Removing everything
 
@@ -201,7 +203,11 @@ in-memory data and require no hardware, network, or real clock.
 
 ## Permissions after updates
 
-Ad-hoc signed updates can invalidate macOS permission grants. **Settings > General >
+Ad-hoc signed updates invalidate macOS permission grants, because the signature changes
+with every build. Releases are signed with one stable self-signed certificate instead
+(see below), so grants are meant to survive updates between builds signed with it. The
+first update to a build signed this way, and any later certificate rotation, still needs
+a one-time re-grant. **Settings > General >
 Reset permissions after updates** is on by default. On the first launch, and whenever
 the main executable's SHA-256 changes (including nightlies with the same version),
 the app uses the system `/usr/bin/tccutil` tool to reset only its own
@@ -211,3 +217,10 @@ Re-allow Screen Recording and Microphone in **Record screen… > Permissions**;
 dictation requests Speech Recognition again on use. A local notice appears if
 notifications are authorized and at least one reset succeeds. Turn the setting off
 to keep existing entries. Resets do not grant access or read capture content.
+
+When the previous and current build are signed by the same certificate, the reset is
+skipped. The app stores a marker of the last-seen certificate signer (authority names
+and leaf certificate hash, no secrets) locally in its preferences for this comparison.
+Release builds use a stable self-signed certificate that is not notarized and not
+trusted by Gatekeeper; the first release signed this way and any certificate rotation
+need a one-time permission re-grant.

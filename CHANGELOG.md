@@ -12,6 +12,11 @@ All notable changes to this project are documented here. The format follows
 - Microphone entitlement and local build parity with release builds (#93).
 
 ### Changed
+- Releases are signed with one stable self-signed certificate (not notarized; the Gatekeeper warning remains) so macOS permission grants and Keychain items survive updates. The first release signed this way needs a one-time re-grant; builds without the signing secrets stay ad-hoc.
+- The updater requires an update to carry the same signer when the running app is certificate-signed; ad-hoc running apps are unaffected.
+- The post-update permission reset is skipped when the previous and current build share the same signing certificate.
+- `scripts/run-local.sh` signs with the stable identity when it is installed locally.
+- The secret scan and `.gitignore` also cover certificate and key files.
 - Permission requests for recording now live only in the recording options window (#95).
 
 ### Fixed
