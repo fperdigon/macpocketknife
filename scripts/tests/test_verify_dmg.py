@@ -82,6 +82,9 @@ case "$1" in
       rm -f "$app/Contents/_CodeSignature/entitlements.plist"
     fi
     exit 0 ;;
+  -dvv)
+    printf '%b' "${DVV_OUTPUT-}"
+    exit 0 ;;
   -d)
     [ ! -f "$app/Contents/_CodeSignature/entitlements.plist" ] ||
       cat "$app/Contents/_CodeSignature/entitlements.plist" ;;
@@ -172,6 +175,33 @@ esac
         mount = next(line.split(" -quiet")[0][7:] for line in log.splitlines()
                      if line.startswith("detach "))
         shutil.rmtree(pathlib.Path(mount).parent)
+
+    def test_expected_identity_matches_leaf_authority(self):
+        self.verify(DVV_OUTPUT="Identifier=x\\nAuthority=MacPocketKnife Signing\\nTeamIdentifier=not set\\n",
+                    EXPECT_SIGNED_IDENTITY="MacPocketKnife Signing")
+
+    def test_expected_identity_ignores_later_chain_entries(self):
+        self.assertIn("detach", self.verify(
+            1, expected_error="unexpected signing identity",
+            DVV_OUTPUT="Authority=Other Leaf\\nAuthority=MacPocketKnife Signing\\n",
+            EXPECT_SIGNED_IDENTITY="MacPocketKnife Signing"))
+
+    def test_expected_identity_rejects_other_certificate(self):
+        self.verify(1, expected_error="unexpected signing identity",
+                    DVV_OUTPUT="Authority=Someone Else\\n",
+                    EXPECT_SIGNED_IDENTITY="MacPocketKnife Signing")
+
+    def test_expected_identity_rejects_adhoc(self):
+        self.verify(1, expected_error="ad-hoc signed",
+                    DVV_OUTPUT="Signature=adhoc\\n", EXPECT_SIGNED_IDENTITY="MacPocketKnife Signing")
+
+    def test_expected_identity_rejects_missing_authority(self):
+        self.verify(1, expected_error="found none", DVV_OUTPUT="Identifier=x\\n",
+                    EXPECT_SIGNED_IDENTITY="MacPocketKnife Signing")
+
+    def test_no_expected_identity_skips_authority_check(self):
+        log = self.verify(DVV_OUTPUT="Signature=adhoc\\n")
+        self.assertNotIn("-dvv", log)
 
     def test_usage(self):
         result = subprocess.run(["bash", str(SCRIPT)], capture_output=True, text=True)

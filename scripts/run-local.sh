@@ -24,7 +24,14 @@ for argument in "$@"; do
 done
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$root"
-BUILD_CHANNEL=dev SIGN_IDENTITY=- sh scripts/make-app-bundle.sh
+# Sign with the stable "MacPocketKnife Signing" identity when it is installed, so local builds
+# behave like releases (permission grants survive rebuilds); otherwise sign ad-hoc.
+if [ -z "${SIGN_IDENTITY:-}" ]; then
+    SIGN_IDENTITY=$(sh scripts/find-signing-identity.sh)
+fi
+SIGN_IDENTITY=${SIGN_IDENTITY:--}
+export SIGN_IDENTITY
+BUILD_CHANNEL=dev sh scripts/make-app-bundle.sh
 bundle="$root/build/MacPocketKnife.app"
 
 # The release bundle ID is OK while running from build/. Never copy this bundle

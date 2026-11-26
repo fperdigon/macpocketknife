@@ -20,7 +20,10 @@ cd "$root"
 bundle="$root/build/MacPocketKnife.app"
 
 # Both builds reuse Swift's release build cache; no DMG is needed.
-BUILD_CHANNEL=dev SIGN_IDENTITY=- sh scripts/make-app-bundle.sh
+# Force ad-hoc so the assertions below hold even when the developer has the stable identity.
+SIGN_IDENTITY=-
+export SIGN_IDENTITY
+BUILD_CHANNEL=dev sh scripts/make-app-bundle.sh
 direct_identifier=$(codesign --display --verbose=4 "$bundle" 2>&1 | sed -n 's/^Identifier=//p')
 [ "$direct_identifier" = io.github.fperdigon.macpocketknife ]
 
@@ -41,6 +44,23 @@ plutil -lint "$plist"
 
 # plutil supplies canonical JSON for a complete key and value comparison.
 # Only the three documented template substitutions may change any values.
+# Identity lookup with a stubbed `security`.
+stubs=$(mktemp -d)
+cat > "$stubs/security" <<'STUB'
+#!/bin/sh
+cat <<'OUT'
+  1) 1111111111111111111111111111111111111111 "Other Identity"
+  2) 2222222222222222222222222222222222222222 "MacPocketKnife Signing" (CSSMERR_TP_CERT_EXPIRED)
+  3) 3333333333333333333333333333333333333333 "MacPocketKnife Signing" (CSSMERR_TP_NOT_TRUSTED)
+     3 identities found
+OUT
+STUB
+chmod +x "$stubs/security"
+[ "$(PATH="$stubs:$PATH" sh scripts/find-signing-identity.sh)" = 3333333333333333333333333333333333333333 ]
+printf '#!/bin/sh\nprintf "  0 identities found\\n"\n' > "$stubs/security"
+[ -z "$(PATH="$stubs:$PATH" sh scripts/find-signing-identity.sh)" ]
+rm -rf "$stubs"
+
 comparison=$(mktemp -d)
 trap 'rm -rf "$comparison"' EXIT HUP INT TERM
 plutil -convert json -o "$comparison/template.json" Resources/Info.plist

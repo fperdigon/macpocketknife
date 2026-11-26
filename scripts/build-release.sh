@@ -18,7 +18,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 version="$(cat VERSION)"
 # Always seal with an ad-hoc signature; no Developer ID or notarization service.
-SIGN_IDENTITY=- sh scripts/make-app-bundle.sh "$@"
+SIGN_IDENTITY="${SIGN_IDENTITY:--}" sh scripts/make-app-bundle.sh "$@"
 app='build/MacPocketKnife.app'
 dmg="dist/MacPocketKnife-${version}.dmg"
 stage="$(mktemp -d)"

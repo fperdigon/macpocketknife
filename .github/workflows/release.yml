@@ -63,8 +63,31 @@ jobs:
         run: |
           swift test
           python3 -m unittest discover -s scripts/tests -v
+      # Only this job receives the signing secrets, and only through this step's environment. With
+      # neither secret set the build stays ad-hoc signed and a warning is shown; a partial or broken
+      # configuration fails the job instead of silently downgrading. The script exports SIGN_IDENTITY
+      # (the certificate hash) and EXPECT_SIGNED_IDENTITY, which build-release.sh and verify-dmg.sh use.
+      - name: Import signing identity
+        env:
+          SIGNING_CERT_P12: ${{ secrets.SIGNING_CERT_P12 }}
+          SIGNING_CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+        run: scripts/import-signing-identity.sh
       - name: Build and verify DMG
         run: scripts/build-release.sh
+      - name: Confirm signing identity
+        run: |
+          if [ -n "${SIGN_IDENTITY:-}" ]; then
+            echo "Signed with the stable identity (expected: ${EXPECT_SIGNED_IDENTITY})."
+          else
+            echo '::warning::This build is ad-hoc signed; it will need new macOS permission grants after every update.'
+          fi
+      - name: Remove temporary signing keychain
+        if: always()
+        run: |
+          if [ -n "${SIGNING_KEYCHAIN:-}" ]; then
+            security delete-keychain "$SIGNING_KEYCHAIN" || true
+            rm -f "$RUNNER_TEMP/macpocketknife-signing.p12"
+          fi
       - name: Check built release version
         if: github.ref_type == 'tag'
         run: |
@@ -160,7 +183,7 @@ jobs:
         run: |
           prev_tag="$(git describe --tags --abbrev=0 --match 'v*' "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
           {
-            echo 'Ad-hoc signed, not notarized. Install with Homebrew (brew install --cask fperdigon/tap/macpocketknife) or see the README for the first-launch steps (System Settings > Privacy & Security > Open Anyway).'
+            echo 'Signed with a self-signed certificate (or ad-hoc), not notarized. Install with Homebrew (brew install --cask fperdigon/tap/macpocketknife) or see the README for the first-launch steps (System Settings > Privacy & Security > Open Anyway).'
             echo
             if [ -n "$prev_tag" ]; then
               echo "## Changes since $prev_tag"
